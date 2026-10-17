@@ -1,0 +1,32 @@
+site_name: CEG5206 — Distributed Matrix Multiplication
+nav:
+  - Home: index.md
+  - Usage and configuration: usage.md
+  - System design: design.md
+  - Algorithms:
+      - Overview: algorithms/overview.md
+      - Cannon: algorithms/cannon.md
+  - Experiment methodology: experiments.md
+  - API reference:
+      - Python: api/index.md
+      - C++: api/cpp.md
+  - Adding an algorithm: contribute.md
+hooks:
+  - pydoc_reference.py
+watch:
+  - ../python/dmm
+markdown_extensions:
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_div_format
+  - pymdownx.arithmatex:
+      generic: true
+extra_javascript:
+  - javascripts/mermaid.mjs
+  - javascripts/mathjax.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-chtml.js
+validation:
+  links:
+    anchors: warn
