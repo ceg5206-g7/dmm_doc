@@ -63,8 +63,9 @@ public:
     std::size_t nodes() const noexcept;
     void send(std::size_t destination, std::size_t tag,
               std::span<const float> payload);
-    std::vector<float> receive(std::size_t source, std::size_t tag,
+    Buffer receive(std::size_t source, std::size_t tag,
                                std::size_t words);
+    Buffer buffer(std::size_t words = 0) const;
     void compute(std::size_t flops) noexcept;
 };
 
@@ -72,6 +73,9 @@ class Bsp {
 public:
     explicit Bsp(std::size_t nodes);
     std::size_t nodes() const noexcept;
+    Buffer buffer(std::size_t node, std::size_t words = 0) const;
+    NodeBuffers buffers(std::size_t words = 0) const;
+    std::size_t live_words(std::size_t node) const;
     void superstep(std::string label, Executor& executor,
                    const std::function<void(Node&)>& body);
     Trace finish();
@@ -110,11 +114,13 @@ struct SuperstepRecord {
     std::string label;
     std::vector<std::size_t> flops;      // Indexed by logical node.
     std::vector<MessageRecord> messages;
+    std::vector<std::size_t> peak_words; // Per-node peak for this step.
 };
 
 struct Trace {
     std::size_t nodes = 0;
     std::vector<SuperstepRecord> supersteps;
+    std::vector<std::size_t> peak_words; // Per-node peak for this trace.
 };
 
 struct Counts {
@@ -122,6 +128,7 @@ struct Counts {
     std::size_t total_flops = 0, critical_flops = 0;
     std::size_t total_words = 0, critical_words = 0;
     std::size_t messages = 0;
+    std::size_t peak_words = 0;
     Counts& operator+=(const Counts& other) noexcept;
     friend bool operator==(const Counts&, const Counts&) = default;
 };
@@ -231,9 +238,9 @@ The benchmark uses its Python NumPy validator; native tests use this function.
 ```cpp
 using TreeGroup = std::vector<std::size_t>;
 void tree_broadcast(Bsp&, Executor&, std::span<const TreeGroup> groups,
-                    std::vector<std::vector<float>>& values, std::size_t tag);
+                    NodeBuffers& values, std::size_t tag);
 void tree_reduce_sum(Bsp&, Executor&, std::span<const TreeGroup> groups,
-                     std::vector<std::vector<float>>& values, std::size_t tag);
+                     NodeBuffers& values, std::size_t tag);
 ```
 
 Each group is an ordered, non-empty list of distinct node ids. The first is
@@ -255,3 +262,33 @@ FLOP. For a four-node group with m words, each operation records 3 messages,
 critical FLOPs. Counts describe this exact heap-tree schedule, not a substituted
 idealized logarithmic formula. Callers choose tags; both collectives drain their
 mailboxes before returning.
+
+## Node payload ownership and peak memory
+
+`memory.hpp` defines move-only `Buffer` and `NodeBuffers = std::vector<Buffer>`.
+Create them with `Bsp::buffer(node, words)`, `Bsp::buffers(words)` (one per node),
+or `Node::buffer(words)` inside a node task. Buffers expose size/data/begin/end,
+indexing, `assign(count, value)`, `assign(span)` and `clear()`. They work as spans
+with `send` and `gemm_add`. Copying a Buffer is disabled; send makes an explicit
+counted copy. `receive` transfers a Buffer without copying. The ledger stays
+alive if a buffer outlives the machine.
+
+Counts track allocated FP32 payload slots, including vector capacity, with no
+container/trace metadata. Same-size assign reuses storage; size-changing assign
+counts the simultaneous old and new allocations before releasing the old one.
+`clear` frees payload storage. Message delivery transfers accounting from the
+sender's outbox to the receiver's inbox; receiving/moving into local storage
+never registers a second allocation. Delivery order is the fixed source-id
+order in BSP and independent of physical worker count.
+
+`live_words(node)` reports current payload storage. Each superstep snapshots its
+own per-node peak, and `finish` returns the lifetime per-node peaks, then starts
+a new peak interval with live buffers as its baseline. `Counts.peak_words` is
+the maximum node peak; combining counts takes max for memory, sums for work and
+communication. Do not add individual buffer peaks or node peaks.
+
+Cannon and tree collectives use these buffers. The current host-side Matrix
+inputs/output and FP64 oracle are whole-program storage outside node payload
+budgets. Future common row shards, conversions, packing and replicas must use
+this same buffer API, so their simultaneously live payload is included. The
+whole process resident memory and DRAM traffic are separate metrics.

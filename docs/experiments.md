@@ -77,7 +77,8 @@ or delay models network time. Measured thread speedup describes this
 implementation only. Communication costs come from the
 [BSP counts](design.md#communication-model) and chosen $g$/$l$ parameters,
 not from wall-clock. Benchmark CSVs do not record traces; use
-`matmul_traced` to obtain counts. Per-node peak memory is not measured.
+`matmul_traced` to obtain counts. Trace records per-node peak payload words; these differ from whole-program
+resident memory and measured DRAM traffic.
 
 Partial CSVs preserve completed measurements after failure. They do not establish
 that the requested experiment finished. Analysis validation checks consistency,

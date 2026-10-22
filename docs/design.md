@@ -155,3 +155,11 @@ Independent disjoint groups share each tree level rather than running serially.
 All payloads go through BSP messages and reduction additions are counted.
 See the [collective API](api/cpp.md#fixed-tree-collectives) for numbering,
 superstep semantics and hand-counted examples.
+
+## Payload lifecycle
+
+Node-local and mailbox payload use move-only `Buffer` objects with per-node
+ledgers. Explicit send copies increase the source peak; delivery moves ownership
+to the destination and receive transfers storage without a duplicate allocation.
+Per-step and trace peaks are exposed in FP32 words. See the
+[memory contract](api/cpp.md#node-payload-ownership-and-peak-memory).

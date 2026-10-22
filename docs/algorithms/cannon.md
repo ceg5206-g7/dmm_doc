@@ -91,8 +91,9 @@ batches. No sleep or delay models the network: wall-clock time includes
 message copies, while network cost comes from the counts and the parameters
 $g$ and $l$.
 
-Common row-slice input/output conversion between algorithms, per-node peak
-memory, 1D ring and 2.5D on the same runtime are future work.
+Cannon local tiles and message buffers use tracked `Buffer` storage; peak words
+are exposed per node and superstep. Common row-slice conversion, 1D ring and
+2.5D integration remain future work.
 
 ## Input and output contract
 

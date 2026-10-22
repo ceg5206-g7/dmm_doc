@@ -8,8 +8,8 @@ Inputs and outputs use FP32. Saved reference products independently accumulate
 in FP64. Cannon runs on one machine as P=q² logical nodes of a configurable square grid on
 a BSP runtime: block skews and shifts are real copied messages, counted per
 superstep but never delayed. BSP costs are computed from those counts afterwards.
-1D ring, replicated 2.5D, common row-slice input/output conversion and per-node
-peak memory are future work.
+Local and message payload memory peaks are tracked per node. 1D ring, replicated
+2.5D and common row-slice input/output conversion remain future work.
 
 | Guide | Contents |
 | --- | --- |
