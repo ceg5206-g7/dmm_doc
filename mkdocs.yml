@@ -9,6 +9,7 @@ nav:
       - Overview: algorithms/overview.md
       - Cannon: algorithms/cannon.md
   - Experiment methodology: experiments.md
+  - Trace and model analysis: model.md
   - API reference:
       - Python: api/index.md
       - C++: api/cpp.md

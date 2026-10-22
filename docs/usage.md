@@ -173,3 +173,10 @@ sample quartiles. Repetitions are summarized separately per input group; multipl
 groups aggregate their medians and IQRs by median. Speedup uses matching serial
 medians. Smoke/lite configurations explicitly use fewer repetitions for pipeline
 checks; those settings are not the proposal performance measurement profile.
+
+## Trace and model commands
+
+`dmm model --config configs/model_smoke.yaml` captures real traces and produces
+normalized BSP costs and budget-selection charts. `--traces PATH` recomputes
+from a complete capture without loading matrices or executing algorithms.
+See the [model guide](model.md) for the frozen full profile and remaining gates.

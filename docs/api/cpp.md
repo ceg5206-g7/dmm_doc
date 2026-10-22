@@ -245,9 +245,11 @@ The benchmark uses its Python NumPy validator; native tests use this function.
 ```cpp
 using TreeGroup = std::vector<std::size_t>;
 void tree_broadcast(Bsp&, Executor&, std::span<const TreeGroup> groups,
-                    NodeBuffers& values, std::size_t tag);
+                    NodeBuffers& values, std::size_t tag,
+                    std::span<const ElementRegion> regions = {});
 void tree_reduce_sum(Bsp&, Executor&, std::span<const TreeGroup> groups,
-                     NodeBuffers& values, std::size_t tag);
+                     NodeBuffers& values, std::size_t tag,
+                    std::span<const ElementRegion> regions = {});
 ```
 
 Each group is an ordered, non-empty list of distinct node ids. The first is
@@ -345,3 +347,8 @@ Python exposes readonly records and `dmm.bsp.validate_coverage(trace)`. Use it
 alongside the independent FP64 oracle and message checks. Tests deliberately
 remove, duplicate and alter executed records to verify the validator fails.
 The model pipeline must invoke this validation before persisting trusted counts.
+
+Tree collectives accept optional one-per-group element regions. If supplied,
+all tree edges preserve that matrix rectangle; payload length and overflow are
+checked before any superstep. Matrix model captures require a region for each
+nonempty payload, so 2.5D replication/reduction should pass these regions.

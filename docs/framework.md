@@ -38,3 +38,10 @@ The statistics subtask now defaults to 5 warmups/15 repeats, reports median/IQR
 with linear quartiles, and uses matching median baselines. The experiment
 milestone remains unchecked until persistence, model sweep, preallocated timing,
 calibration and residual validation are finished.
+
+Trace persistence, independent offline counting, model CSVs, budget filtering and
+selection/cost/memory figures are implemented and tested on real Cannon traces.
+The frozen full profile defines 24 executions/192 scenarios/144 selection cells,
+but cannot yet execute missing ring/2.5D implementations. It remains a gate,
+not a waived condition. Preallocated timing, calibration and residuals remain.
+See [trace/model analysis](model.md) for commands, units and output boundaries.
