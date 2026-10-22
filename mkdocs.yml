@@ -4,6 +4,7 @@ nav:
   - Usage and configuration: usage.md
   - System design: design.md
   - Framework milestones: framework.md
+  - Project proposal: proposal.md
   - Algorithms:
       - Overview: algorithms/overview.md
       - Cannon: algorithms/cannon.md

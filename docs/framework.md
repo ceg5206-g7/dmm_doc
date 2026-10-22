@@ -1,8 +1,7 @@
 # Framework implementation contract
 
 The accepted scope is the following eight decisions. A checked item has code,
-tests and documentation; unchecked items remain required work. The original
-proposal PDF is retained until its source/errata are updated explicitly.
+tests and documentation; unchecked items remain required work. The [versioned proposal PDF](proposal.pdf) includes the approved C++20 amendment.
 
 - [x] Shared rectangular FP32 blocked GEMM: tile 32, row strides, tails, no allocation.
 - [x] Fixed binary-tree broadcast and FP32 sum reduction through BSP messages.
@@ -12,7 +11,7 @@ proposal PDF is retained until its source/errata are updated explicitly.
 - [x] Common zero padding to a multiple of P, cropping and original/padded metrics.
 - [ ] Trace persistence, 24 executed configurations, 192 model scenarios, two budgets,
       layout charts, preallocated measurement, 5/15 median/IQR, calibration and residuals.
-- [ ] C++20 amendment of the proposal (the implementation already uses C++20).
+- [x] C++20 amendment of the proposal (the implementation already uses C++20).
 
 Existing P/c case configuration is shared across YAML, Python and C++. Each YAML
 case requires layout/P/c. `ring` uses c=1; Cannon uses c=1 and P=q²; 2.5D uses
