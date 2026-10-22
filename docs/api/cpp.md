@@ -398,3 +398,23 @@ A failed prepared executor batch invalidates the trace snapshot. A later run can
 use another executor: cached-message ownership is restored before peak reset and
 timing, so both results and memory peaks recover. A regression test interrupts a
 run immediately after delivery and compares recovery with a fresh workspace.
+
+The same `tree_broadcast`/`tree_reduce_sum` names also accept `PreparedBsp`,
+groups, a span of preallocated buffer ids, tag and one element region per group.
+They share topology validation with the ordinary BSP helpers and append the same
+fixed binary-tree level schedule, including uneven/disjoint groups. Every group
+participant must already have a matching buffer. Singleton groups append no steps.
+Teammates can use these overloads for prepared replication/reduction without
+rewriting collective schedules. Regression tests compare outputs/FLOPs/messages/
+supersteps against the runtime helpers and assert zero execution allocations.
+
+`rows_to_blocks`/`blocks_to_rows` also accept a prepared plan, padded n, c,
+row/block buffer-id spans, tag and optional scratch ids. They provide the same
+common two-step conversions, element regions and base-layer mapping for c=1/4.
+Every node owns an n²/P-word row buffer; the first q² nodes need n²/q²-word block
+buffers. Buffers may be shared between rows and blocks when capacity permits;
+retaining an aliased self rectangle requires n²/(P*q) words of separate scratch.
+P=1 aliases the identical row/native storage and appends no steps. Cannon uses
+these shared overloads. Tests cover prepared P=64/256,c=4 conversions independently
+of any 2.5D multiplication, compare runtime communication counts and check both
+padded tiles and restored row shards without execution allocations.
