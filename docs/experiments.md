@@ -1,6 +1,6 @@
 # Experiment Methodology
 
-## Timing boundary
+## Convenience benchmark timing boundary
 
 Python uses `time.perf_counter()` around `matmul(A, B, executor)`.
 Google Benchmark is not used.
@@ -59,8 +59,9 @@ For each matching layout/P/c/size, speedup is the serial summary median divided
 by the threaded summary median. Both must contain matching input groups.
 Duplicate samples, incomplete/inconsistent repeat sets, missing baselines and
 invalid times are rejected. Legacy CSVs without repeat count as one sample.
-Sequential summary speedup is one. Runtime plots use medians. The timing boundary
-still includes allocation until the separate preallocated driver is implemented.
+Sequential summary speedup is one. Runtime plots use medians. The convenience timing boundary includes allocation. For the separate
+allocation-free driver, calibration and held-out residuals, see
+[prepared measurements](measurement.md).
 
 Do not combine runs with different timing boundaries, builds or input settings.
 Earlier Google Benchmark or persistent-runner timings are not directly comparable.
@@ -79,7 +80,8 @@ between node-local buffers, with a barrier after each superstep, but no sleep
 or delay models network time. Measured thread speedup describes this
 implementation only. Communication costs come from the
 [BSP counts](design.md#communication-model) and chosen $g$/$l$ parameters,
-not from wall-clock. Benchmark CSVs do not yet persist traces; use
+not from wall-clock. Convenience benchmark CSVs do not persist traces; the
+[model](model.md) and [measurement](measurement.md) commands do. Direct callers use
 `matmul_traced` for the complete common path and `count_native(trace)` for
 the body excluding only input/output conversion. Trace records per-node peak payload words; these differ from whole-program
 resident memory and measured DRAM traffic.

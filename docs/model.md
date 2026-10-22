@@ -95,6 +95,6 @@ produce 144 layout-selection cells. Cardinality tests verify this plan.
 **The full run is not complete:** ring and 2.5D are not yet implemented, so that
 profile currently rejects preflight. The shared pipeline and charts are tested
 with actual Cannon traces. The proposal gate still requires the real 24 traces,
-including P=256,c=4. Preallocated measurement, independent calibration and
-held-out residual checks are separate unfinished work. See
+including P=256,c=4. The [prepared measurement command](measurement.md) separately provides independent
+calibration and held-out residual checks with the same saved-trace format. See
 [framework milestones](framework.md).

@@ -180,3 +180,8 @@ checks; those settings are not the proposal performance measurement profile.
 normalized BSP costs and budget-selection charts. `--traces PATH` recomputes
 from a complete capture without loading matrices or executing algorithms.
 See the [model guide](model.md) for the frozen full profile and remaining gates.
+
+
+For allocation-free row-to-row timing, independent calibration and held-out
+prediction checks, use `uv run dmm measure --config configs/measure_serial.yaml`
+or `configs/measure_threaded.yaml`. See [measurement details](measurement.md).

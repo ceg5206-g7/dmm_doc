@@ -10,6 +10,7 @@ nav:
       - Cannon: algorithms/cannon.md
   - Experiment methodology: experiments.md
   - Trace and model analysis: model.md
+  - Prepared measurement and calibration: measurement.md
   - API reference:
       - Python: api/index.md
       - C++: api/cpp.md

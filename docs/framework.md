@@ -11,6 +11,7 @@ tests and documentation; unchecked items remain required work. The [versioned pr
 - [x] Common zero padding to a multiple of P, cropping and original/padded metrics.
 - [ ] Trace persistence, 24 executed configurations, 192 model scenarios, two budgets,
       layout charts, preallocated measurement, 5/15 median/IQR, calibration and residuals.
+      Framework pipeline is implemented; the 24-run integration gate awaits teammate algorithms.
 - [x] C++20 amendment of the proposal (the implementation already uses C++20).
 
 Existing P/c case configuration is shared across YAML, Python and C++. Each YAML
@@ -36,18 +37,22 @@ without enumerating scalar n³ terms. Algorithm/model integration must call it.
 
 The statistics subtask now defaults to 5 warmups/15 repeats, reports median/IQR
 with linear quartiles, and uses matching median baselines. The experiment
-milestone remains unchecked until persistence, model sweep, preallocated timing,
-calibration and residual validation are finished.
+milestone remains unchecked until the complete 24-run integration is available;
+shared persistence, sweeps, prepared timing, calibration and residual reporting are implemented.
 
 Trace persistence, independent offline counting, model CSVs, budget filtering and
 selection/cost/memory figures are implemented and tested on real Cannon traces.
 The frozen full profile defines 24 executions/192 scenarios/144 selection cells,
 but cannot yet execute missing ring/2.5D implementations. It remains a gate,
-not a waived condition. Preallocated timing, calibration and residuals remain.
+not a waived condition. Prepared timing, independent calibration and held-out residuals
+are available through the measurement command.
 See [trace/model analysis](model.md) for commands, units and output boundaries.
 
 Preallocated execution now has shared operation scheduling and cached, tracked
 message buffers. Prepared Cannon validates the same work/message schedule as the
 convenience route and performs no allocation inside run_into (C++ regression
-counts caller/worker allocations). Independent microkernels are exposed; their
-calibration/report integration and held-out residual experiment remain next.
+counts caller/worker allocations). Independent microkernels now freeze local w/g/l per executor context before any
+full matrix run. Measurement reports preserve raw 5/15 samples, median/IQR,
+prepared traces, component times and held-out residuals without per-case fitting.
+The P=4/H=4 profile requires four detected physical cores. See
+[measurement protocol](measurement.md).
