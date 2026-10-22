@@ -147,3 +147,11 @@ All layouts use `gemm_add` in `include/dmm/gemm.hpp`: rectangular FP32
 C += A*B with row strides, fixed tile 32, tail handling and no allocation.
 Logical node blocks are separate from local kernel tiles.
 See the [framework contract](framework.md) for completed and remaining work.
+
+## Tree communication
+
+Fixed heap-tree broadcast and sum reduction are implemented in `collectives.hpp`.
+Independent disjoint groups share each tree level rather than running serially.
+All payloads go through BSP messages and reduction additions are counted.
+See the [collective API](api/cpp.md#fixed-tree-collectives) for numbering,
+superstep semantics and hand-counted examples.

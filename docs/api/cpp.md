@@ -223,3 +223,35 @@ Validation checks dimensions and both storage lengths, finite tolerances and
 values, and elementwise absolute/relative tolerance. Malformed arguments throw
 `std::invalid_argument`; incorrect/non-finite values throw `std::runtime_error`.
 The benchmark uses its Python NumPy validator; native tests use this function.
+
+## Fixed tree collectives
+
+`include/dmm/collectives.hpp` exposes:
+
+```cpp
+using TreeGroup = std::vector<std::size_t>;
+void tree_broadcast(Bsp&, Executor&, std::span<const TreeGroup> groups,
+                    std::vector<std::vector<float>>& values, std::size_t tag);
+void tree_reduce_sum(Bsp&, Executor&, std::span<const TreeGroup> groups,
+                     std::vector<std::vector<float>>& values, std::size_t tag);
+```
+
+Each group is an ordered, non-empty list of distinct node ids. The first is
+root; rank r has parent (r-1)/2 and children 2r+1, 2r+2 where present. Groups
+must be disjoint and ids in range. `values` has one entry per machine node;
+a node task accesses only its own entry. Nonparticipants remain unchanged.
+Broadcast overwrites nonroot entries with copied root data. Reduction requires
+equal lengths within a group, sums children in rank order and leaves the result
+at the root (other entries are not promised to remain original partial sums).
+Validation completes before any superstep is executed.
+
+Independent groups execute in the same supersteps. Broadcast visits depth 0
+through the maximum depth; reduction visits the opposite order. Labels are
+`replication` and `reduction`. The last step consumes the final messages and is
+charged as a real superstep; singleton-only groups need zero supersteps.
+Every edge uses `send/receive`; every reduction element addition records one
+FLOP. For a four-node group with m words, each operation records 3 messages,
+3m total words, 3m critical words and 3 supersteps. Reduction adds 3m total and
+critical FLOPs. Counts describe this exact heap-tree schedule, not a substituted
+idealized logarithmic formula. Callers choose tags; both collectives drain their
+mailboxes before returning.

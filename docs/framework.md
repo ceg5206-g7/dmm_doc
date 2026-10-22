@@ -5,7 +5,7 @@ tests and documentation; unchecked items remain required work. The original
 proposal PDF is retained until its source/errata are updated explicitly.
 
 - [x] Shared rectangular FP32 blocked GEMM: tile 32, row strides, tails, no allocation.
-- [ ] Fixed binary-tree broadcast and FP32 sum reduction through BSP messages.
+- [x] Fixed binary-tree broadcast and FP32 sum reduction through BSP messages.
 - [ ] Common per-node row shards and traced conversion to/from 2D/base-layer layouts.
 - [ ] Live per-node payload memory including owned input/output and message buffers.
 - [ ] Actual block/interval multiplication coverage with an independent validator.
