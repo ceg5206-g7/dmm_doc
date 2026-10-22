@@ -1,58 +1,58 @@
 # Framework implementation contract
 
-The accepted scope is the following eight decisions. A checked item has code,
-tests and documentation; unchecked items remain required work. The [versioned proposal PDF](proposal.pdf) includes the approved C++20 amendment.
+The eight accepted implementation decisions below have code, tests and committed
+documentation. The [versioned proposal](proposal.pdf) includes the approved
+C++20 amendment. Full three-layout experimental acceptance remains a separate
+integration gate; implemented infrastructure does not establish that comparison.
 
 - [x] Shared rectangular FP32 blocked GEMM: tile 32, row strides, tails, no allocation.
-- [x] Fixed binary-tree broadcast and FP32 sum reduction through BSP messages.
+- [x] Fixed binary-tree broadcast and FP32 sum reduction through copied BSP messages.
 - [x] Common per-node row shards and traced conversion to/from 2D/base-layer layouts.
-- [x] Live per-node payload memory including owned input/output and message buffers.
+- [x] Live per-node payload memory including owned input/output, packing and messages.
 - [x] Actual block/interval multiplication coverage with an independent validator.
 - [x] Common zero padding to a multiple of P, cropping and original/padded metrics.
-- [ ] Trace persistence, 24 executed configurations, 192 model scenarios, two budgets,
-      layout charts, preallocated measurement, 5/15 median/IQR, calibration and residuals.
-      Framework pipeline is implemented; the 24-run integration gate awaits teammate algorithms.
+- [x] Trace persistence, model/profile scans, two budgets, layout charts, prepared
+      timing, 5/15 median/IQR, independent calibration and held-out residual reports.
 - [x] C++20 amendment of the proposal (the implementation already uses C++20).
 
-Existing P/c case configuration is shared across YAML, Python and C++. Each YAML
-case requires layout/P/c. `ring` uses c=1; Cannon uses c=1 and P=q²; 2.5D uses
-P=c*q² and c dividing q. Ring and 2.5D still require implementation.
+Each YAML case requires layout/P/c. Ring uses c=1; Cannon uses c=1 and P=q²;
+2.5D uses P=c*q² and c dividing q. P can exceed worker count H: the executor
+batches logical nodes. Dataset/oracle I/O and host-side adapters are outside
+logical-node budgets. Node-owned allocated capacity remains counted when idle;
+whole-process RSS is a different metric.
 
-The target end-to-end phases are input_conversion, skew, replication, multiply,
-reduction, output_conversion. Native body costs exclude only the first and last.
-Local packing is timed and included in payload memory; only node-to-node traffic
-is charged as communication. No sleeps emulate network time.
+The six phases are input_conversion, skew, replication, multiply, reduction,
+output_conversion. Native body costs exclude only the first and last. Packing
+is timed and counted in payload memory; only node-to-node traffic is charged as
+communication. No sleep emulates network time. Executed GEMMs record dimensions
+and block triples through the shared kernel hook, checked independently without
+enumerating scalar n³ terms.
 
-Each milestone is tested and committed in the documentation submodule and main
-repository. Future model data must be backed by real traces; unavailable
-algorithms must never be replaced by fabricated or purely analytic execution.
+[Prepared execution](api/cpp.md#preallocated-execution) shares operation scheduling,
+message caches, tree collectives and common layout conversions. Cannon is its
+reference adapter. Tests verify no allocation on caller/worker threads, including
+the first execution, and recovery after an interrupted executor batch. Prepared
+and allocation-based routes use their own actual peaks; measurements and budgets
+must use the same route's trace.
 
-Memory accounting now covers Cannon local tiles and all BSP/tree message buffers.
-Common row-shard/conversion/packing buffers now use these same tracked buffers.
-Host-side matrices and the oracle remain outside logical-node budgets.
+[Model analysis](model.md) replays checked saved traces without loading matrices.
+[Prepared measurement](measurement.md) freezes independent local w/g/l before
+held-out full-matrix runs and preserves every raw sample/residual. Source/build,
+settings, input hashes, physical/logical CPUs, binding policy and load are saved.
+See the [verification record](verification.md) for actual runs and limitations.
 
-Executed products now record actual GEMM dimensions and uniform block triples
-at Node::multiply_add. The shared validator supports q/q/q and P/P/1 grids
-without enumerating scalar n³ terms. Algorithm/model integration must call it.
+## Remaining integration gate
 
-The statistics subtask now defaults to 5 warmups/15 repeats, reports median/IQR
-with linear quartiles, and uses matching median baselines. The experiment
-milestone remains unchecked until the complete 24-run integration is available;
-shared persistence, sweeps, prepared timing, calibration and residual reporting are implemented.
+- [ ] Implement ring and 2.5D (**assigned to teammates**).
+- [ ] Execute the full `configs/model.yaml`: 24 actual configurations, 192 model
+      scenarios and 144 budget-selection cells with all required candidates.
 
-Trace persistence, independent offline counting, model CSVs, budget filtering and
-selection/cost/memory figures are implemented and tested on real Cannon traces.
-The frozen full profile defines 24 executions/192 scenarios/144 selection cells,
-but cannot yet execute missing ring/2.5D implementations. It remains a gate,
-not a waived condition. Prepared timing, independent calibration and held-out residuals
-are available through the measurement command.
-See [trace/model analysis](model.md) for commands, units and output boundaries.
+The frozen profile/cardinality test specifies that target; it does not replace
+execution. Missing algorithms fail preflight. No unavailable algorithm is
+represented by a fabricated or analytic execution. Shared framework verification
+has passed for real Cannon cases and independent c=4 conversion tests; the full
+three-layout comparison awaits teammate implementations.
 
-Preallocated execution now has shared operation scheduling and cached, tracked
-message buffers. Prepared Cannon validates the same work/message schedule as the
-convenience route and performs no allocation inside run_into (C++ regression
-counts caller/worker allocations). Independent microkernels now freeze local w/g/l per executor context before any
-full matrix run. Measurement reports preserve raw 5/15 samples, median/IQR,
-prepared traces, component times and held-out residuals without per-case fitting.
-The P=4/H=4 profile requires four detected physical cores. See
-[measurement protocol](measurement.md).
+Each implementation milestone was tested and committed in both repositories.
+Teammates follow the [algorithm/prepare contracts](contribute.md), using the shared
+kernel, communication, collectives, conversions, coverage and measurement APIs.

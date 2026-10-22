@@ -11,6 +11,7 @@ nav:
   - Experiment methodology: experiments.md
   - Trace and model analysis: model.md
   - Prepared measurement and calibration: measurement.md
+  - Verification record: verification.md
   - API reference:
       - Python: api/index.md
       - C++: api/cpp.md

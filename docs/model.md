@@ -77,9 +77,10 @@ no feasible candidate explicitly say infeasible.
 - `phase_model.csv`: per-phase and native-body costs from the same execution.
 - `layout_selection.csv`: budget cap, feasible/infeasible candidates and all
   minimum-cost native/end-to-end choices.
-- `model.json`: formula, units, assumptions, cardinalities and source-manifest hash.
+- `model.json`: formula, units, assumptions, cardinalities, analysis Git revision
+  and source-manifest hash.
 - `layout_selection.png`: faceted by n, lambda and budget, gamma horizontally
-  and logical P vertically; infeasible cells and ties are explicit.
+  and logical P vertically; available candidates, infeasible cells and ties are explicit.
 - `cost_breakdown.png`, `conversion_breakdown.png`, `native_vs_common.png`:
   one labelled representative slice at the largest n/gamma/lambda. All other
   scenarios remain in the CSVs.
