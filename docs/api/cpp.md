@@ -29,8 +29,8 @@ zero dimensions and size arithmetic overflow using `sizeof(T)`. `block` rejects
 malformed storage and empty/out-of-bounds blocks. Views are read-only, trivially
 copyable borrowers; keep the source alive and its storage stable.
 
-Cannon uses `Matrix<float>` and copies each node's initial blocks through
-`MatrixBlockView<float>`. Independent native test references use `Matrix<double>`.
+Cannon uses `Matrix<float>` at its host adapters and tracked node buffers
+inside its common-shard and native schedules. Independent native test references use `Matrix<double>`.
 Template definitions are in `algorithm.hpp`.
 
 ## Shared blocked GEMM
@@ -62,7 +62,7 @@ public:
     std::size_t id() const noexcept;
     std::size_t nodes() const noexcept;
     void send(std::size_t destination, std::size_t tag,
-              std::span<const float> payload);
+              std::span<const float> payload, std::optional<ElementRegion> region = std::nullopt);
     Buffer receive(std::size_t source, std::size_t tag,
                                std::size_t words);
     Buffer buffer(std::size_t words = 0) const;
@@ -108,6 +108,7 @@ An unreceived delivered message makes the next `superstep` or `finish` throw
 ```cpp
 struct MessageRecord {
     std::size_t source, destination, tag, words;
+    std::optional<ElementRegion> region;
 };
 
 struct SuperstepRecord {
@@ -121,6 +122,7 @@ struct Trace {
     std::size_t nodes = 0;
     std::vector<SuperstepRecord> supersteps;
     std::vector<std::size_t> peak_words; // Per-node peak for this trace.
+    std::size_t original_size = 0, padded_size = 0;
 };
 
 struct Counts {
@@ -135,6 +137,7 @@ struct Counts {
 
 Counts count(const SuperstepRecord& superstep);
 Counts count(const Trace& trace);
+Counts count_native(const Trace& trace);
 
 struct CostParameters {
     double w = 1, g = 0, l = 0;
@@ -175,6 +178,7 @@ struct Cannon {
     std::size_t P = 16, c = 1;
     Matrix<float> matmul(const Matrix<float>& a, const Matrix<float>& b,
                          Executor& executor) const;
+    Traced run_native(const Matrix<float>& a, const Matrix<float>& b, Executor& executor) const;
     Traced run(const Matrix<float>& a, const Matrix<float>& b,
                Executor& executor) const;
 };
@@ -186,9 +190,10 @@ FP32 matrices plus an executor reference and return exactly `Matrix<float>`
 by value. `TracedAlgorithm<T>` also requires `run` to return the product and
 its BSP trace as `Traced`. Algorithms use plain structs without a virtual base.
 
-Cannon validates matching square storage, c=1 and square P=q*q, with dimensions
-divisible by q. `run` executes q+1 [supersteps](../algorithms/cannon.md#supersteps-and-message-routes)
-on `Bsp(P)`; `matmul` returns `run(...).product`.
+Cannon validates matching square storage, c=1 and square P=q*q. `run` uses
+common row shards, zero padding to a multiple of P and traced conversions;
+`run_native` requires dimensions divisible by q and executes only the q+1 body
+[supersteps](../algorithms/cannon.md#supersteps-and-message-routes) on `Bsp(P)`; `matmul` returns `run(...).product`.
 
 ## Executors
 
@@ -207,7 +212,7 @@ std::unique_ptr<Executor> make_executor(std::size_t workers);
 `count` is the number of tasks; `task(index)` performs task `index` for indices
 from zero through `count-1`. The call is synchronous and propagates task errors.
 `Bsp` submits one batch per superstep with one task per node, so Cannon
-submits five batches of 16 tasks. A zero task count does no work.
+submits eleven batches of 16 tasks by default on the common route. A zero task count does no work.
 
 `make_executor(0)` creates serial execution. Positive counts create a thread
 pool. `ThreadExecutor` starts workers at construction, provides `enter()` and
@@ -292,3 +297,26 @@ inputs/output and FP64 oracle are whole-program storage outside node payload
 budgets. Future common row shards, conversions, packing and replicas must use
 this same buffer API, so their simultaneously live payload is included. The
 whole process resident memory and DRAM traffic are separate metrics.
+
+## Common shards and conversion
+
+`sharding.hpp` provides `RowShards{original_size, size, NodeBuffers values}` and
+`BlockShards{original_size, size, c, NodeBuffers values}`. Construct row inputs
+with `make_row_shards(machine, matrix)` and gather/crop with
+`gather_row_shards(rows)`. `padded_size(n,P)` checks overflow and FP32 storage
+size before allocation. Common n is padded to a multiple of P.
+
+`rows_to_blocks(machine, executor, rows, c, tag)` converts to base-layer blocks;
+`blocks_to_rows(machine, executor, blocks, tag)` converts the base C layer back.
+For 2.5D the first q*q nodes hold base blocks and other layers start empty.
+Both use two supersteps per conversion, or zero for P=1. Messages carry
+`ElementRegion{row,col,rows,cols}`; its rectangle must match payload size and
+must not overflow. Buffer dimensions and ownership are checked before execution,
+including rejecting buffers from another machine. Round-trip tests cover P=1,
+16,64,256, c=1 and the two valid c=4 proposal configurations.
+
+`count_native(trace)` excludes exactly input_conversion/output_conversion labels
+and takes memory peaks from those retained steps. `count(trace)` includes all
+stages. Each node records packing and local output storage in the same memory
+ledger as computation. Host scatter/gather adapters do not masquerade as logical
+communication; the actual row/block redistribution is always explicit messages.

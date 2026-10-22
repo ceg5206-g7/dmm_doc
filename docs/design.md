@@ -106,7 +106,7 @@ Each task receives its index. The call returns after all tasks complete and
 propagates errors. Algorithm code borrows the executor and does not start or
 close it. The BSP runtime submits one batch per superstep, with one task per
 logical node, and delivers messages on the caller between batches; Cannon
-therefore submits q+1 batches of P tasks (five batches of 16 by default).
+therefore submits q+7 batches of P tasks on the common route for P>1.
 
 | Executor | Behavior |
 | --- | --- |
@@ -163,3 +163,12 @@ ledgers. Explicit send copies increase the source peak; delivery moves ownership
 to the destination and receive transfers storage without a duplicate allocation.
 Per-step and trace peaks are exposed in FP32 words. See the
 [memory contract](api/cpp.md#node-payload-ownership-and-peak-memory).
+
+## Common input and output
+
+Cannon now routes through node-owned row shards and two-step BSP conversion
+in each direction; both A and B inputs convert separately. Original sizes pad
+to a common multiple of P and the output crops after returning row shards.
+Messages carry global element rectangles. The native body metric excludes only
+input/output conversion using `count_native`, with the same padded arithmetic.
+See [Cannon phases](algorithms/cannon.md#supersteps-and-message-routes).

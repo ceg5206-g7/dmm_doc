@@ -4,7 +4,7 @@
 
 | Configuration name | Status | Size requirement |
 | --- | --- | --- |
-| [`cannon`](cannon.md) | Implemented | Square P=q*q, c=1; positive dimension divisible by q |
+| [`cannon`](cannon.md) | Implemented | Square P=q*q, c=1; any positive n with common padding |
 | `ring` | Not implemented | Positive P, c=1 |
 | `2.5d` | Not implemented | P=c*q*q and c divides q |
 

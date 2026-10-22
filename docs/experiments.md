@@ -8,7 +8,7 @@ Google Benchmark is not used.
 Included work:
 
 - Python wrapper and binding dispatch, input validation and copies into C++.
-- Node-local block copies and tile initialization.
+- Common row-shard construction, packing, row/block conversion and tile initialization.
 - Message payload copies and delivery between supersteps.
 - Executor dispatch per superstep, shared blocked GEMM, completion waits and tile assembly.
 - Copying the native result into its independent NumPy output.
@@ -76,8 +76,9 @@ between node-local buffers, with a barrier after each superstep, but no sleep
 or delay models network time. Measured thread speedup describes this
 implementation only. Communication costs come from the
 [BSP counts](design.md#communication-model) and chosen $g$/$l$ parameters,
-not from wall-clock. Benchmark CSVs do not record traces; use
-`matmul_traced` to obtain counts. Trace records per-node peak payload words; these differ from whole-program
+not from wall-clock. Benchmark CSVs do not yet persist traces; use
+`matmul_traced` for the complete common path and `count_native(trace)` for
+the body excluding only input/output conversion. Trace records per-node peak payload words; these differ from whole-program
 resident memory and measured DRAM traffic.
 
 Partial CSVs preserve completed measurements after failure. They do not establish

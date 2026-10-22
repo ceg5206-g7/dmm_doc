@@ -92,7 +92,8 @@ warmups: 5
 
 `repeats` defaults to one positive measurement count; `warmups` defaults to five
 and may be zero. Sizes must be ascending and present in the dataset. Cannon
-requires square P=q*q, c=1 and dimensions divisible by q. Each case requires
+requires square P=q*q and c=1; original dimensions are padded to a multiple of P
+and cropped on output. Each case requires
 exactly layout/P/c, with no duplicates. Layout names are `ring`, `cannon`, and
 `2.5d`; only Cannon is implemented. Old global algorithms/P/c keys must be
 migrated to cases. All cases run across the shared modes, groups and sizes. Unsupported selections fail
@@ -161,3 +162,8 @@ converting them. Read-only arrays, transposes and negative strides are supported
 The result owns independent storage. A closed thread executor cannot be reused.
 
 See the generated [Python reference](api/index.md) for dataset and runner APIs.
+
+Traces expose `original_size`, `padded_size`, and message `region` rectangles.
+`count_native(trace)` reports the same execution excluding only input/output
+conversion. `matmul_traced(..., native_layout=True)` is an explicit unpadded
+native-input test adapter; its size must be divisible by sqrt(P).

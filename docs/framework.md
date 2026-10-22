@@ -6,10 +6,10 @@ proposal PDF is retained until its source/errata are updated explicitly.
 
 - [x] Shared rectangular FP32 blocked GEMM: tile 32, row strides, tails, no allocation.
 - [x] Fixed binary-tree broadcast and FP32 sum reduction through BSP messages.
-- [ ] Common per-node row shards and traced conversion to/from 2D/base-layer layouts.
+- [x] Common per-node row shards and traced conversion to/from 2D/base-layer layouts.
 - [x] Live per-node payload memory including owned input/output and message buffers.
 - [ ] Actual block/interval multiplication coverage with an independent validator.
-- [ ] Common zero padding to a multiple of P, cropping and original/padded metrics.
+- [x] Common zero padding to a multiple of P, cropping and original/padded metrics.
 - [ ] Trace persistence, 24 executed configurations, 192 model scenarios, two budgets,
       layout charts, preallocated measurement, 5/15 median/IQR, calibration and residuals.
 - [ ] C++20 amendment of the proposal (the implementation already uses C++20).
@@ -28,5 +28,5 @@ repository. Future model data must be backed by real traces; unavailable
 algorithms must never be replaced by fabricated or purely analytic execution.
 
 Memory accounting now covers Cannon local tiles and all BSP/tree message buffers.
-The common row-shard/conversion milestone must use these tracked buffers too.
+Common row-shard/conversion/packing buffers now use these same tracked buffers.
 Host-side matrices and the oracle remain outside logical-node budgets.

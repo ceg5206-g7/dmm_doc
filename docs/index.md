@@ -9,7 +9,7 @@ in FP64. Cannon runs on one machine as P=q² logical nodes of a configurable squ
 a BSP runtime: block skews and shifts are real copied messages, counted per
 superstep but never delayed. BSP costs are computed from those counts afterwards.
 Local and message payload memory peaks are tracked per node. 1D ring, replicated
-2.5D and common row-slice input/output conversion remain future work.
+2.5D remain future work. Common row-shard conversion and padding are implemented.
 
 | Guide | Contents |
 | --- | --- |
