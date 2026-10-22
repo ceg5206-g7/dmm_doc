@@ -97,3 +97,13 @@ inside node tasks to execute shared GEMM and record work/coverage atomically.
 Set trace.coverage to the uniform block partition, and verify it with
 `validate_coverage` from `coverage.hpp`; do not reconstruct coverage from planned
 loop counts after execution. Reduction additions use `compute` without products.
+
+
+For allocation-free measurements, also expose `prepare(A,B,*,P,c)` returning an
+object with `run_into(preallocated_float32_output,executor)` and `trace()`.
+Use the shared C++ `PreparedBsp` operations in `include/dmm/prepared.hpp`; Cannon's
+adapter is the reference. Reset only common input rows outside its internal timer;
+keep layout conversions, zeroing C and all algorithm operations inside the plan.
+The returned timings use the six framework phases and end_to_end fields.
+Model/correctness capture can still use `matmul_traced`; measurement budgets and
+residuals must use the prepared run's own trace, including retained caches.

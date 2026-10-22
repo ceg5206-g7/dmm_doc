@@ -45,3 +45,9 @@ The frozen full profile defines 24 executions/192 scenarios/144 selection cells,
 but cannot yet execute missing ring/2.5D implementations. It remains a gate,
 not a waived condition. Preallocated timing, calibration and residuals remain.
 See [trace/model analysis](model.md) for commands, units and output boundaries.
+
+Preallocated execution now has shared operation scheduling and cached, tracked
+message buffers. Prepared Cannon validates the same work/message schedule as the
+convenience route and performs no allocation inside run_into (C++ regression
+counts caller/worker allocations). Independent microkernels are exposed; their
+calibration/report integration and held-out residual experiment remain next.

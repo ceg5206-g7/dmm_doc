@@ -352,3 +352,44 @@ Tree collectives accept optional one-per-group element regions. If supplied,
 all tree edges preserve that matrix rectangle; payload length and overflow are
 checked before any superstep. Matrix model captures require a region for each
 nonempty payload, so 2.5D replication/reduction should pass these regions.
+
+## Preallocated execution
+
+`include/dmm/prepared.hpp` provides `PreparedBsp`. Allocate node-owned buffers,
+add phase-labelled steps, then declare local copies, zero fills, sends, matching
+next-step receives and `multiply_add` operations. `receive(..., add=true)` fuses
+an FP32 sum into the received copy for reductions. Its arithmetic is counted;
+its elapsed time belongs to the copy bucket. Local views must belong to the
+specified node; GEMM output cannot alias its inputs. In-place layout conversion
+requires explicit, counted scratch storage.
+
+`seal(n_original,n_padded,CoverageGrid)` validates messages and allocates the
+schedule, trace slots and reusable message storage. Every sent message must have
+exactly one receive in the immediately following step. A sealed plan cannot be
+changed. `execute(executor)` executes the real copies and shared GEMM, updates
+preallocated trace records and returns total/per-phase timings without allocation.
+The C++ regression test counts global allocations on caller and worker threads,
+including the first execution, for serial and P>H execution.
+
+Each logical step uses three blocking executor batches: local/received copies,
+GEMMs, outgoing copies. The barrier before outgoing copies makes message-slot
+reuse safe. Each sender reuses slots by size and within-step ordinal; delivery
+transfers counted ownership to the destination, and receive returns the cached
+storage to the sender. Cached allocated payload remains counted even when idle.
+Generic plans require caller serialization of reset/access/execution.
+
+`PreparedCannon` is the reference adapter. It reuses common row/tile storage and
+an explicit small packing scratch, locks reset/execute/gather, and exposes
+`run_into(output,executor)` plus an executed trace snapshot. Python
+`cannon.prepare(A,B,P=...,c=...)` owns copies of the inputs. Its writable,
+C-contiguous float32 output must be allocated before `run_into`.
+
+The internal timer starts at common row shards and ends at common row shards.
+It includes zeroing C, layout conversion, packing, message copies, GEMM and
+scheduling. Allocation, host input reset/distribution, host output assembly,
+Python/GIL work and validation are outside it. Per-batch maximum node task time
+is classified as compute/copy; the rest of wall time is scheduling/synchronization.
+For P>H that remainder also includes batching of logical-node tasks. This is a
+wall-time decomposition, not a count of memory traffic or a network measurement.
+Prepared storage can have different peaks from the convenience allocation-based
+route: use its own executed trace for budgets and predictions.
