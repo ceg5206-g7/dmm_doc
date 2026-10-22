@@ -33,3 +33,8 @@ Host-side matrices and the oracle remain outside logical-node budgets.
 Executed products now record actual GEMM dimensions and uniform block triples
 at Node::multiply_add. The shared validator supports q/q/q and P/P/1 grids
 without enumerating scalar n³ terms. Algorithm/model integration must call it.
+
+The statistics subtask now defaults to 5 warmups/15 repeats, reports median/IQR
+with linear quartiles, and uses matching median baselines. The experiment
+milestone remains unchecked until persistence, model sweep, preallocated timing,
+calibration and residual validation are finished.

@@ -47,17 +47,20 @@ stage ordering is tested explicitly with cancellation-sensitive inputs.
 
 ## Aggregation and speedup
 
-Analysis averages repeated times within each group, then averages those group
-means for each layout/P/c/mode/worker-count/size. For each layout/P/c and size,
+The default and full convenience profile warm up 5 times and measure 15 repeats.
+Smoke/lite profiles override these counts for fast pipeline checks. Each input
+group reports the sample median and IQR=Q75−Q25, using linear interpolation at
+position (N−1)*p in sorted samples. For multiple input groups, summary median_time_s
+is the median of group medians; iqr_time_s is the median of group IQRs. This
+preserves repeat variability without treating different inputs as repetitions.
+A single sample has IQR zero; it does not demonstrate stable performance.
 
-$$
-S_p = \frac{\overline{T}_{sequential}}{\overline{T}_{threaded,p}}.
-$$
-
-The baseline must contain matching input groups. Duplicate samples, incomplete
-or inconsistent repeat sets, missing baselines and invalid times are rejected.
-Legacy CSVs without a repeat column count as one measurement. Reports use means,
-rather than medians or confidence intervals. Sequential summary speedup is one.
+For each matching layout/P/c/size, speedup is the serial summary median divided
+by the threaded summary median. Both must contain matching input groups.
+Duplicate samples, incomplete/inconsistent repeat sets, missing baselines and
+invalid times are rejected. Legacy CSVs without repeat count as one sample.
+Sequential summary speedup is one. Runtime plots use medians. The timing boundary
+still includes allocation until the separate preallocated driver is implemented.
 
 Do not combine runs with different timing boundaries, builds or input settings.
 Earlier Google Benchmark or persistent-runner timings are not directly comparable.

@@ -11,7 +11,7 @@ the BSP communication runtime, Cannon arithmetic and serial/thread execution.
 | `python/dmm/config.py` | Load YAML, resolve paths and validate settings |
 | `python/dmm/datasets.py` | Generate and load shared FP32 inputs and independent FP64 references |
 | `python/dmm/benchmark.py` | Manage cases, warmups, timing, validation and CSV/JSON |
-| `python/dmm/analysis.py` | Validate results, average samples, calculate speedup and plot |
+| `python/dmm/analysis.py` | Validate results, report median/IQR, calculate speedup and plot |
 | `python/dmm/cli.py` | Expose generate, bench and analyze commands |
 | `python/dmm/execution.py` | Re-export bound C++ executor classes |
 | `python/dmm/bsp.py` | Re-export bound trace records, `count` and `bsp_cost` |

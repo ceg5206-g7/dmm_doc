@@ -21,8 +21,8 @@ setting requires at least two logical CPUs.
 For regular runs, generate with `configs/dataset.yaml`, then benchmark with
 `configs/benchmark_lite.yaml` or `configs/benchmark.yaml`. Lite covers five sizes
 through 256, three groups and three execution settings: 45 measurements with two
-warmups. Full covers eight sizes through 2048 with three repeats and five
-warmups: 216 measurements. Scalar multiplication is cubic, so large runs can
+warmups. Full covers eight sizes through 2048 with fifteen repeats and five
+warmups: 1080 measurements. Scalar multiplication is cubic, so large runs can
 take substantially longer.
 
 After changing C++ code, rebuild the installed extension:
@@ -86,11 +86,11 @@ modes:
     workers: [1, 2]
 groups: [0, 1, 2]
 sizes: [16, 32]
-repeats: 3
+repeats: 15
 warmups: 5
 ```
 
-`repeats` defaults to one positive measurement count; `warmups` defaults to five
+`repeats` defaults to fifteen positive measurements; `warmups` defaults to five
 and may be zero. Sizes must be ascending and present in the dataset. Cannon
 requires square P=q*q and c=1; original dimensions are padded to a multiple of P
 and cropped on output. Each case requires
@@ -167,3 +167,9 @@ Traces expose `original_size`, `padded_size`, and message `region` rectangles.
 `count_native(trace)` reports the same execution excluding only input/output
 conversion. `matmul_traced(..., native_layout=True)` is an explicit unpadded
 native-input test adapter; its size must be divisible by sqrt(P).
+
+Timing summaries expose median_time_s and iqr_time_s, with linearly interpolated
+sample quartiles. Repetitions are summarized separately per input group; multiple
+groups aggregate their medians and IQRs by median. Speedup uses matching serial
+medians. Smoke/lite configurations explicitly use fewer repetitions for pipeline
+checks; those settings are not the proposal performance measurement profile.
