@@ -116,6 +116,7 @@ struct SuperstepRecord {
     std::vector<std::size_t> flops;      // Indexed by logical node.
     std::vector<MessageRecord> messages;
     std::vector<std::size_t> peak_words; // Per-node peak for this step.
+    std::vector<ProductRecord> products;
 };
 
 struct Trace {
@@ -123,6 +124,7 @@ struct Trace {
     std::vector<SuperstepRecord> supersteps;
     std::vector<std::size_t> peak_words; // Per-node peak for this trace.
     std::size_t original_size = 0, padded_size = 0;
+    CoverageGrid coverage;
 };
 
 struct Counts {
@@ -320,3 +322,26 @@ and takes memory peaks from those retained steps. `count(trace)` includes all
 stages. Each node records packing and local output storage in the same memory
 ledger as computation. Host scatter/gather adapters do not masquerade as logical
 communication; the actual row/block redistribution is always explicit messages.
+
+## Executed multiplication coverage
+
+`Node::multiply_add(product, A, lda, B, ldb, C, ldc)` calls the shared blocked
+GEMM, then records its successful execution and FLOPs together. The product is
+`ProductRegion{i,k,j,m,n,inner}`: uniform block indices and actual GEMM dimensions.
+Failed bounds checks do not create records or charge work. Each superstep's
+`products` contains `ProductRecord{node,product}`; these metadata are excluded
+from payload memory accounting.
+
+`Trace.coverage = CoverageGrid{row_parts,inner_parts,col_parts}` defines the
+uniform partition of padded_size. Cannon uses q,q,q; a row ring uses P,P,1;
+2.5D uses q,q,q across all layers. The shared `validate_coverage(trace)` in
+`coverage.hpp` independently checks node ids, indices, actual GEMM shapes,
+per-node recorded FLOPs and exactly one execution of every (i,k,j) triple.
+It never expands n³ scalar terms; storage scales with the number of block
+triples. Invalid partition metadata throws invalid_argument; missing, repeated
+or inconsistent executed blocks throw runtime_error.
+
+Python exposes readonly records and `dmm.bsp.validate_coverage(trace)`. Use it
+alongside the independent FP64 oracle and message checks. Tests deliberately
+remove, duplicate and alter executed records to verify the validator fails.
+The model pipeline must invoke this validation before persisting trusted counts.

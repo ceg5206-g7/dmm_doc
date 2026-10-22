@@ -7,7 +7,7 @@ tests and documentation; unchecked items remain required work. The [versioned pr
 - [x] Fixed binary-tree broadcast and FP32 sum reduction through BSP messages.
 - [x] Common per-node row shards and traced conversion to/from 2D/base-layer layouts.
 - [x] Live per-node payload memory including owned input/output and message buffers.
-- [ ] Actual block/interval multiplication coverage with an independent validator.
+- [x] Actual block/interval multiplication coverage with an independent validator.
 - [x] Common zero padding to a multiple of P, cropping and original/padded metrics.
 - [ ] Trace persistence, 24 executed configurations, 192 model scenarios, two budgets,
       layout charts, preallocated measurement, 5/15 median/IQR, calibration and residuals.
@@ -29,3 +29,7 @@ algorithms must never be replaced by fabricated or purely analytic execution.
 Memory accounting now covers Cannon local tiles and all BSP/tree message buffers.
 Common row-shard/conversion/packing buffers now use these same tracked buffers.
 Host-side matrices and the oracle remain outside logical-node budgets.
+
+Executed products now record actual GEMM dimensions and uniform block triples
+at Node::multiply_add. The shared validator supports q/q/q and P/P/1 grids
+without enumerating scalar n³ terms. Algorithm/model integration must call it.

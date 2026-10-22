@@ -81,5 +81,5 @@ with a padded common execution, supply the same padded input size.
   an independent FP64 oracle with the agreed tolerance, not universal bitwise equality.
 
 Node storage uses move-only tracked buffers and explicit messages. The algorithm
-object carries P/c without mutable execution state. Coverage hooks and the 1D/2.5D
-algorithms are remaining work. See [framework milestones](../framework.md).
+object carries P/c without mutable execution state. Executed block triples and actual GEMM shapes are recorded by Node::multiply_add
+and can be checked with validate_coverage. The 1D/2.5D algorithms remain pending. See [framework milestones](../framework.md).

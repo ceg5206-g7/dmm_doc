@@ -91,3 +91,9 @@ Pinned Mermaid and MathJax assets render these features in the browser.
 Use `dmm::gemm_add` from `gemm.hpp` for local arithmetic. Do not implement
 a layout-specific multiplication loop or change the shared tile.
 Each benchmark case supplies its own layout/P/c; CSV and analysis keep these separate.
+
+Call `Node::multiply_add(ProductRegion{i,k,j,m,n,inner}, A, lda, B, ldb, C, ldc)`
+inside node tasks to execute shared GEMM and record work/coverage atomically.
+Set trace.coverage to the uniform block partition, and verify it with
+`validate_coverage` from `coverage.hpp`; do not reconstruct coverage from planned
+loop counts after execution. Reduction additions use `compute` without products.
