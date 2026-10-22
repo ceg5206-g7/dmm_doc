@@ -393,3 +393,8 @@ For P>H that remainder also includes batching of logical-node tasks. This is a
 wall-time decomposition, not a count of memory traffic or a network measurement.
 Prepared storage can have different peaks from the convenience allocation-based
 route: use its own executed trace for budgets and predictions.
+
+A failed prepared executor batch invalidates the trace snapshot. A later run can
+use another executor: cached-message ownership is restored before peak reset and
+timing, so both results and memory peaks recover. A regression test interrupts a
+run immediately after delivery and compares recovery with a fresh workspace.
