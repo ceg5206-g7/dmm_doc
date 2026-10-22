@@ -29,23 +29,159 @@ zero dimensions and size arithmetic overflow using `sizeof(T)`. `block` rejects
 malformed storage and empty/out-of-bounds blocks. Views are read-only, trivially
 copyable borrowers; keep the source alive and its storage stable.
 
-Cannon uses `Matrix<float>` and `MatrixBlockView<float>`. Independent native test
-references use `Matrix<double>`. Template definitions are in `algorithm.hpp`.
+Cannon uses `Matrix<float>` and copies each node's initial blocks through
+`MatrixBlockView<float>`. Independent native test references use `Matrix<double>`.
+Template definitions are in `algorithm.hpp`.
+
+## Shared blocked GEMM
+
+`include/dmm/gemm.hpp` provides `GEMM_TILE = 32` and:
+
+```cpp
+void gemm_add(std::size_t m, std::size_t n, std::size_t k,
+              std::span<const float> a, std::size_t lda,
+              std::span<const float> b, std::size_t ldb,
+              std::span<float> c, std::size_t ldc);
+```
+
+This computes `C += A*B` for row-major FP32 rectangles with row strides in
+words. It allocates nothing, supports tile tails, preserves input and padding
+words, and visits k in ascending order per output element. Nonzero C is allowed;
+C must not overlap A/B. Storage lengths and strides are checked before writing,
+including integer overflow. All layouts must use this kernel and frozen tile.
+Tests compare strided rectangles against an independent FP64 oracle.
+
+## BSP runtime
+
+`include/dmm/bsp.hpp` declares an algorithm-independent runtime of logical nodes
+with private mailboxes. Communication is copied and counted, never delayed.
+
+```cpp
+class Node {
+public:
+    std::size_t id() const noexcept;
+    std::size_t nodes() const noexcept;
+    void send(std::size_t destination, std::size_t tag,
+              std::span<const float> payload);
+    std::vector<float> receive(std::size_t source, std::size_t tag,
+                               std::size_t words);
+    void compute(std::size_t flops) noexcept;
+};
+
+class Bsp {
+public:
+    explicit Bsp(std::size_t nodes);
+    std::size_t nodes() const noexcept;
+    void superstep(std::string label, Executor& executor,
+                   const std::function<void(Node&)>& body);
+    Trace finish();
+};
+```
+
+`Bsp(nodes)` rejects zero nodes with `std::invalid_argument`. `superstep` runs
+`body` once per node as one `Executor::for_each` batch, checks that every
+message delivered by the previous superstep was received, records the
+superstep and then delivers its messages. `finish` performs the same check for
+the last superstep, returns the trace and starts an empty one.
+
+A `Node` is the handle for one node during one superstep; only that node's task
+uses it, and it cannot be constructed outside `Bsp`.
+
+- `send` copies `payload` into a message delivered for the next superstep.
+  A destination outside the machine throws `std::out_of_range`; sending to
+  itself throws `std::invalid_argument`; a second message with the same
+  destination and tag in one superstep throws `std::logic_error`.
+- `receive` moves out the message from `(source, tag)` delivered at the end of
+  the previous superstep. An invalid source throws `std::out_of_range`; a
+  missing message or a length other than `words` throws `std::logic_error`.
+- `compute` adds local FLOPs; a multiply-add counts as two.
+
+An unreceived delivered message makes the next `superstep` or `finish` throw
+`std::logic_error`.
+
+## Traces, counts and cost
+
+```cpp
+struct MessageRecord {
+    std::size_t source, destination, tag, words;
+};
+
+struct SuperstepRecord {
+    std::string label;
+    std::vector<std::size_t> flops;      // Indexed by logical node.
+    std::vector<MessageRecord> messages;
+};
+
+struct Trace {
+    std::size_t nodes = 0;
+    std::vector<SuperstepRecord> supersteps;
+};
+
+struct Counts {
+    std::size_t supersteps = 0;
+    std::size_t total_flops = 0, critical_flops = 0;
+    std::size_t total_words = 0, critical_words = 0;
+    std::size_t messages = 0;
+    Counts& operator+=(const Counts& other) noexcept;
+    friend bool operator==(const Counts&, const Counts&) = default;
+};
+
+Counts count(const SuperstepRecord& superstep);
+Counts count(const Trace& trace);
+
+struct CostParameters {
+    double w = 1, g = 0, l = 0;
+};
+
+double bsp_cost(const Counts& counts, const CostParameters& parameters);
+```
+
+Payload sizes are FP32 words. Messages are recorded in the superstep that sent
+them. For a superstep, `count` sums FLOPs, words and messages, and takes
+`critical_flops` as the maximum node FLOPs and `critical_words` as the maximum
+over nodes of $h = \max(\text{sent}, \text{received})$. Counting a trace adds
+the per-superstep counts, so critical counts are sums of per-superstep maxima.
+
+`bsp_cost` returns
+`w * critical_flops + g * critical_words + l * supersteps`. Non-finite or
+negative parameters throw `std::invalid_argument`. Python exposes these records
+read-only through `dmm.bsp`, with `bsp_cost(counts, *, w=1, g=0, l=0)`.
 
 ## Algorithms
 
 ```cpp
+struct Traced {
+    Matrix<float> product;
+    Trace trace;
+};
+
+template <typename T>
+concept TracedAlgorithm = Algorithm<T> && requires(
+    const T& algorithm, const Matrix<float>& a, const Matrix<float>& b,
+    Executor& executor) {
+    { algorithm.run(a, b, executor) } -> std::same_as<Traced>;
+};
+
+inline constexpr std::size_t GRID = 4;
+
 struct Cannon {
+    std::size_t P = 16, c = 1;
     Matrix<float> matmul(const Matrix<float>& a, const Matrix<float>& b,
                          Executor& executor) const;
+    Traced run(const Matrix<float>& a, const Matrix<float>& b,
+               Executor& executor) const;
 };
-static_assert(Algorithm<Cannon>);
+static_assert(TracedAlgorithm<Cannon>);
 ```
 
 `Algorithm<T>` is a C++20 concept requiring a const algorithm to accept two
 FP32 matrices plus an executor reference and return exactly `Matrix<float>`
-by value. Algorithms use plain structs without a virtual base. Cannon validates
-matching square storage and dimensions divisible by four.
+by value. `TracedAlgorithm<T>` also requires `run` to return the product and
+its BSP trace as `Traced`. Algorithms use plain structs without a virtual base.
+
+Cannon validates matching square storage, c=1 and square P=q*q, with dimensions
+divisible by q. `run` executes q+1 [supersteps](../algorithms/cannon.md#supersteps-and-message-routes)
+on `Bsp(P)`; `matmul` returns `run(...).product`.
 
 ## Executors
 
@@ -63,7 +199,8 @@ std::unique_ptr<Executor> make_executor(std::size_t workers);
 
 `count` is the number of tasks; `task(index)` performs task `index` for indices
 from zero through `count-1`. The call is synchronous and propagates task errors.
-Cannon submits 16 tasks in a single batch. A zero task count does no work.
+`Bsp` submits one batch per superstep with one task per node, so Cannon
+submits five batches of 16 tasks. A zero task count does no work.
 
 `make_executor(0)` creates serial execution. Positive counts create a thread
 pool. `ThreadExecutor` starts workers at construction, provides `enter()` and

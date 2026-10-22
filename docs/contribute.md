@@ -1,14 +1,13 @@
 # Adding an Algorithm
 
 Keep computation in C++ and orchestration in Python. Cannon is the existing
-example; its fixed grid is an implementation detail rather than a requirement
-for every algorithm.
+example; its P=q*q grid is configurable and differs from a 1D or replicated grid.
 
 ## Files to change
 
 | File | Change |
 | --- | --- |
-| `include/dmm/<name>.hpp`, `src/<name>.cpp` | Implement a stateless native algorithm and assert its concept |
+| `include/dmm/<name>.hpp`, `src/<name>.cpp` | Implement a native algorithm with const execution methods and assert its concept |
 | `CMakeLists.txt` | Add the source to `dmm_core` and its native test to `dmm_tests` |
 | `src/bindings.cpp` | Add the NumPy/native entry point with validation and ownership handling |
 | `python/dmm/algorithms/<name>.py` | Expose size validation and multiplication |
@@ -18,7 +17,8 @@ for every algorithm.
 | `configs/benchmark_<name>.yaml` | Select supported sizes and a fresh output path |
 | `doc/docs/algorithms/`, `doc/mkdocs.yml` | Document availability, arithmetic, constraints and measurement limits |
 
-`fox`, `strassen` and `cw` are already recognized but unimplemented. Their names
+`ring` and `2.5d` are recognized but unimplemented (modules `ring.py` and
+`two_point_five_d.py`). Their names
 alone do not make them runnable. The runner dynamically imports the selected
 module; no additional CLI branch is needed.
 
@@ -26,15 +26,19 @@ module; no additional CLI branch is needed.
 
 Use the native signature from the [C++ reference](api/cpp.md#algorithms).
 Borrow the executor for each call and return independent FP32 matrix storage.
-Use `Executor::for_each` for tasks without creating a nested pool. Preserve
+Distributed algorithms should run on `dmm::Bsp`, moving data between logical
+nodes only through `send`/`receive`, recording work with `compute`, and
+providing `run` to satisfy `TracedAlgorithm`. See the
+[BSP runtime](api/cpp.md#bsp-runtime). Otherwise, use `Executor::for_each`
+for tasks without creating a nested pool. Preserve
 inputs and keep task-referenced storage alive until the synchronous batch ends.
 Algorithm implementations need no inheritance hierarchy.
 
 The Python module exposes:
 
 ```python
-def validate_size(size: int) -> None: ...
-def matmul(A: np.ndarray, B: np.ndarray, executor: Executor) -> np.ndarray: ...
+def validate_size(size: int, *, P: int, c: int) -> None: ...
+def matmul(A: np.ndarray, B: np.ndarray, executor: Executor, *, P: int, c: int) -> np.ndarray: ...
 ```
 
 Size validation must reject unsupported sizes without allocating matrices or
@@ -51,7 +55,8 @@ through the supplied executor.
 Cover several supported sizes, invalid inputs, zero/identity/random matrices,
 independent FP64 reference comparison, input preservation and repeated calls.
 Run with serial execution and one/multiple worker threads. Test algorithm-specific
-invariants; Cannon checks cancellation-sensitive stage ordering. Check binding
+invariants; Cannon checks cancellation-sensitive stage ordering, hand-computed
+BSP counts and message routes. Check binding
 output dtype and independence, plus preflight rejection before experiment setup.
 
 From the main checkout:
@@ -82,3 +87,7 @@ Use `$...$` for inline math and `$$` on separate lines for display equations.
 The [system design](design.md#modules-and-data-flow) and
 [Cannon guide](algorithms/cannon.md#cannons-logical-block-grid) provide examples.
 Pinned Mermaid and MathJax assets render these features in the browser.
+
+Use `dmm::gemm_add` from `gemm.hpp` for local arithmetic. Do not implement
+a layout-specific multiplication loop or change the shared tile.
+Each benchmark case supplies its own layout/P/c; CSV and analysis keep these separate.

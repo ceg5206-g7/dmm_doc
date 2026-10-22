@@ -8,8 +8,9 @@ Google Benchmark is not used.
 Included work:
 
 - Python wrapper and binding dispatch, input validation and copies into C++.
-- Cannon task preparation, local tile allocation and initialization.
-- Executor dispatch, scalar arithmetic, completion wait and tile assembly.
+- Node-local block copies and tile initialization.
+- Message payload copies and delivery between supersteps.
+- Executor dispatch per superstep, shared blocked GEMM, completion waits and tile assembly.
 - Copying the native result into its independent NumPy output.
 
 Dataset/reference loading, pool construction and shutdown, warmups, correctness
@@ -47,7 +48,7 @@ stage ordering is tested explicitly with cancellation-sensitive inputs.
 ## Aggregation and speedup
 
 Analysis averages repeated times within each group, then averages those group
-means for each algorithm/mode/worker-count/size. For each algorithm and size,
+means for each layout/P/c/mode/worker-count/size. For each layout/P/c and size,
 
 $$
 S_p = \frac{\overline{T}_{sequential}}{\overline{T}_{threaded,p}}.
@@ -69,11 +70,14 @@ those changes. Record machine load and experimental conditions when interpreting
 results. Warmup and repetition reduce some variability but do not guarantee
 stable frequency, cache state or absence of scheduling noise.
 
-The fixed grid exposes 16 output-block tasks regardless of worker count. Workers
-share one process and machine. Logical block shifts use views; no neighbor
-messages, network cost, node-local buffers or per-round barriers are simulated.
-Measured thread speedup describes this implementation only. Communication and
-distributed-layout comparisons require the deferred simulation work.
+The logical grid runs P nodes per superstep regardless of worker count.
+Workers share one process and machine. Neighbour shifts are copied messages
+between node-local buffers, with a barrier after each superstep, but no sleep
+or delay models network time. Measured thread speedup describes this
+implementation only. Communication costs come from the
+[BSP counts](design.md#communication-model) and chosen $g$/$l$ parameters,
+not from wall-clock. Benchmark CSVs do not record traces; use
+`matmul_traced` to obtain counts. Per-node peak memory is not measured.
 
 Partial CSVs preserve completed measurements after failure. They do not establish
 that the requested experiment finished. Analysis validation checks consistency,

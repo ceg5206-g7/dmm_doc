@@ -77,7 +77,9 @@ Old integer or raw binary datasets must be regenerated.
 ```yaml
 data_dir: ../data
 output: ../results/custom.csv
-algorithms: [cannon]
+cases:
+  - {layout: cannon, P: 16, c: 1}
+  - {layout: cannon, P: 64, c: 1}
 modes:
   sequential: {}
   threaded:
@@ -90,8 +92,10 @@ warmups: 5
 
 `repeats` defaults to one positive measurement count; `warmups` defaults to five
 and may be zero. Sizes must be ascending and present in the dataset. Cannon
-requires dimensions divisible by four. The benchmark recognizes `cannon`, `fox`,
-`strassen` and `cw`, but only Cannon is implemented. Unsupported selections fail
+requires square P=q*q, c=1 and dimensions divisible by q. Each case requires
+exactly layout/P/c, with no duplicates. Layout names are `ring`, `cannon`, and
+`2.5d`; only Cannon is implemented. Old global algorithms/P/c keys must be
+migrated to cases. All cases run across the shared modes, groups and sizes. Unsupported selections fail
 before output creation or worker startup.
 
 Sequential mode takes no options. Threaded mode requires a non-empty, unique
@@ -104,7 +108,7 @@ is preserved. See [measurement rules](experiments.md) for loop and timing detail
 Each run writes a CSV and a companion JSON with the same stem. CSV columns are:
 
 ```text
-algorithm,mode,workers,group,pair,size,repeat,time_s,max_abs_error,frobenius_relative_error
+layout,P,c,mode,workers,group,pair,size,repeat,time_s,max_abs_error,frobenius_relative_error
 ```
 
 Times are seconds. Sequential `workers` is empty. `pair` identifies the size's
@@ -130,11 +134,26 @@ import numpy as np
 A = np.eye(4, dtype=np.float32)
 B = np.ones((4, 4), dtype=np.float32)
 with SerialExecutor() as executor:
-    C = matmul(A, B, executor)
+    C = matmul(A, B, executor, P=16, c=1)
 with ThreadExecutor(workers=2) as executor:
     D = matmul(A, B, executor)
 np.testing.assert_array_equal(C, D)
 ```
+
+`matmul_traced` returns the same product together with its BSP trace:
+
+```python
+from dmm.algorithms.cannon import matmul_traced
+from dmm.bsp import bsp_cost, count
+
+with SerialExecutor() as executor:
+    C, trace = matmul_traced(A, B, executor)
+counts = count(trace)  # count(trace.supersteps[s]) gives one superstep.
+cost = bsp_cost(counts, w=1, g=10, l=100)
+```
+
+`bsp_cost` takes keyword-only parameters and can be recomputed for any $g$ and
+$l$ without rerunning. See the [communication model](design.md#communication-model).
 
 Import `dmm` before NumPy so the package's numerical-library thread limits apply
 before libraries initialize. Direct calls reject other dtypes instead of

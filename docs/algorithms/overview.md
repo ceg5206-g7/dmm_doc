@@ -4,10 +4,9 @@
 
 | Configuration name | Status | Size requirement |
 | --- | --- | --- |
-| [`cannon`](cannon.md) | Implemented | Positive integer dimension divisible by four |
-| `fox` | Recognized name; not implemented | Not defined |
-| `strassen` | Recognized name; not implemented | Not defined |
-| `cw` | Recognized name; not implemented | Not defined |
+| [`cannon`](cannon.md) | Implemented | Square P=q*q, c=1; positive dimension divisible by q |
+| `ring` | Not implemented | Positive P, c=1 |
+| `2.5d` | Not implemented | P=c*q*q and c divides q |
 
 Selecting an unimplemented algorithm fails before an experiment starts. Each
 implemented algorithm has its own page describing its size rules, computation,
@@ -15,7 +14,7 @@ validation, and performance limits.
 
 ## Algorithm interface
 
-Each implementation exposes `validate_size(size)` and `matmul(A, B, executor)`.
+Each implementation exposes `validate_size(size, *, P, c)` and `matmul(A, B, executor, *, P, c)`.
 The runner supplies data, execution settings, timing, and correctness checks.
 See [System design](../design.md#dataset-and-algorithm-boundaries) for the shared
 contract and [Adding an algorithm](../contribute.md) for the implementation and

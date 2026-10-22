@@ -3,6 +3,7 @@ nav:
   - Home: index.md
   - Usage and configuration: usage.md
   - System design: design.md
+  - Framework milestones: framework.md
   - Algorithms:
       - Overview: algorithms/overview.md
       - Cannon: algorithms/cannon.md
