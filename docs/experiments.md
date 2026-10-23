@@ -1,6 +1,6 @@
 # Experiment Methodology
 
-## Timing boundary
+## Convenience benchmark timing boundary
 
 Python uses `time.perf_counter()` around `matmul(A, B, executor)`.
 Google Benchmark is not used.
@@ -8,8 +8,9 @@ Google Benchmark is not used.
 Included work:
 
 - Python wrapper and binding dispatch, input validation and copies into C++.
-- Cannon task preparation, local tile allocation and initialization.
-- Executor dispatch, scalar arithmetic, completion wait and tile assembly.
+- Common row-shard construction, packing, row/block conversion and tile initialization.
+- Message payload copies and delivery between supersteps.
+- Executor dispatch per superstep, shared blocked GEMM, completion waits and tile assembly.
 - Copying the native result into its independent NumPy output.
 
 Dataset/reference loading, pool construction and shutdown, warmups, correctness
@@ -46,17 +47,21 @@ stage ordering is tested explicitly with cancellation-sensitive inputs.
 
 ## Aggregation and speedup
 
-Analysis averages repeated times within each group, then averages those group
-means for each algorithm/mode/worker-count/size. For each algorithm and size,
+The default and full convenience profile warm up 5 times and measure 15 repeats.
+Smoke/lite profiles override these counts for fast pipeline checks. Each input
+group reports the sample median and IQR=Q75−Q25, using linear interpolation at
+position (N−1)*p in sorted samples. For multiple input groups, summary median_time_s
+is the median of group medians; iqr_time_s is the median of group IQRs. This
+preserves repeat variability without treating different inputs as repetitions.
+A single sample has IQR zero; it does not demonstrate stable performance.
 
-$$
-S_p = \frac{\overline{T}_{sequential}}{\overline{T}_{threaded,p}}.
-$$
-
-The baseline must contain matching input groups. Duplicate samples, incomplete
-or inconsistent repeat sets, missing baselines and invalid times are rejected.
-Legacy CSVs without a repeat column count as one measurement. Reports use means,
-rather than medians or confidence intervals. Sequential summary speedup is one.
+For each matching layout/P/c/size, speedup is the serial summary median divided
+by the threaded summary median. Both must contain matching input groups.
+Duplicate samples, incomplete/inconsistent repeat sets, missing baselines and
+invalid times are rejected. Legacy CSVs without repeat count as one sample.
+Sequential summary speedup is one. Runtime plots use medians. The convenience timing boundary includes allocation. For the separate
+allocation-free driver, calibration and held-out residuals, see
+[prepared measurements](measurement.md).
 
 Do not combine runs with different timing boundaries, builds or input settings.
 Earlier Google Benchmark or persistent-runner timings are not directly comparable.
@@ -69,11 +74,17 @@ those changes. Record machine load and experimental conditions when interpreting
 results. Warmup and repetition reduce some variability but do not guarantee
 stable frequency, cache state or absence of scheduling noise.
 
-The fixed grid exposes 16 output-block tasks regardless of worker count. Workers
-share one process and machine. Logical block shifts use views; no neighbor
-messages, network cost, node-local buffers or per-round barriers are simulated.
-Measured thread speedup describes this implementation only. Communication and
-distributed-layout comparisons require the deferred simulation work.
+The logical grid runs P nodes per superstep regardless of worker count.
+Workers share one process and machine. Neighbour shifts are copied messages
+between node-local buffers, with a barrier after each superstep, but no sleep
+or delay models network time. Measured thread speedup describes this
+implementation only. Communication costs come from the
+[BSP counts](design.md#communication-model) and chosen $g$/$l$ parameters,
+not from wall-clock. Convenience benchmark CSVs do not persist traces; the
+[model](model.md) and [measurement](measurement.md) commands do. Direct callers use
+`matmul_traced` for the complete common path and `count_native(trace)` for
+the body excluding only input/output conversion. Trace records per-node peak payload words; these differ from whole-program
+resident memory and measured DRAM traffic.
 
 Partial CSVs preserve completed measurements after failure. They do not establish
 that the requested experiment finished. Analysis validation checks consistency,

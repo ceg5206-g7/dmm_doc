@@ -3,10 +3,17 @@ nav:
   - Home: index.md
   - Usage and configuration: usage.md
   - System design: design.md
+  - Framework milestones: framework.md
+  - Project proposal: proposal.md
   - Algorithms:
       - Overview: algorithms/overview.md
       - Cannon: algorithms/cannon.md
   - Experiment methodology: experiments.md
+  - Trace and model analysis: model.md
+  - Prepared measurement and calibration: measurement.md
+  - Verification record: verification.md
+  - Case conclusions:
+      - Cannon: conclusion/cannon.md
   - API reference:
       - Python: api/index.md
       - C++: api/cpp.md
