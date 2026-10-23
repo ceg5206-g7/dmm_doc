@@ -213,8 +213,10 @@ std::unique_ptr<Executor> make_executor(std::size_t workers);
 
 `count` is the number of tasks; `task(index)` performs task `index` for indices
 from zero through `count-1`. The call is synchronous and propagates task errors.
-`Bsp` submits one batch per superstep with one task per node, so Cannon
-submits eleven batches of 16 tasks by default on the common route. A zero task count does no work.
+`Bsp` submits one batch per superstep with one task per node. Cannon's single
+prepared engine submits three batches per logical step: 33 batches of 16 tasks
+for its default 11-step common route. The cost model still charges S=11.
+A zero task count does no work.
 
 `make_executor(0)` creates serial execution. Positive counts create a thread
 pool. `ThreadExecutor` starts workers at construction, provides `enter()` and
@@ -391,8 +393,28 @@ Python/GIL work and validation are outside it. Per-batch maximum node task time
 is classified as compute/copy; the rest of wall time is scheduling/synchronization.
 For P>H that remainder also includes batching of logical-node tasks. This is a
 wall-time decomposition, not a count of memory traffic or a network measurement.
-Prepared storage can have different peaks from the convenience allocation-based
-route: use its own executed trace for budgets and predictions.
+Ordinary Cannon calls now construct a temporary `PreparedCannon` and run this
+same engine. Identical common-input calls have identical complete traces and
+payload peaks. An explicit native-input test adapter skips conversions and can
+have different peaks; older allocation-based traces also keep their original
+peaks. Use the actual captured trace for budgets and predictions.
+
+`run_once(prepared,executor)` allocates a host output, executes a prepared object
+once and returns `Traced{product,trace}`. `PlannedAlgorithm<Prepared>` provides
+P/c and the `Algorithm`/`TracedAlgorithm` methods by constructing that object.
+A prepared implementation needs a constructor `(a,b,P,c)`, `size()`,
+`run_into(span<float>,Executor&)` returning `RunTimings`, and `trace()` returning
+an executed `Trace` snapshot. `size()` is the original matrix side length;
+`run_into` writes exactly size()² words after cropping. For example:
+
+```cpp
+using PlannedCannon = PlannedAlgorithm<PreparedCannon>;
+static_assert(TracedAlgorithm<PlannedCannon>);
+```
+
+New ring/2.5D implementations can use this alias pattern: no ordinary BSP
+schedule is required. The existing `Cannon` type remains as a compatibility
+facade; its optional native-input adapter also uses the same plan builder.
 
 A failed prepared executor batch invalidates the trace snapshot. A later run can
 use another executor: cached-message ownership is restored before peak reset and

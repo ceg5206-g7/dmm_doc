@@ -1,8 +1,11 @@
 # Cannon's Algorithm
 
-The Python entry points are `matmul` and `matmul_traced` in
-`python/dmm/algorithms/cannon.py`; C++ arithmetic is in `src/cannon.cpp`.
-All arithmetic uses the shared blocked `gemm_add` kernel (tile 32).
+The Python entry points are `matmul`, `matmul_traced` and `prepare` in
+`python/dmm/algorithms/cannon.py`. `src/cannon.cpp` contains one Cannon schedule,
+built by `PreparedCannon` on the shared `PreparedBsp` runtime. Ordinary calls
+create a temporary prepared object through `PlannedAlgorithm`; `prepare` retains
+the same object for repeated execution. All arithmetic uses the shared blocked
+`gemm_add` kernel (tile 32).
 
 ## Cannon's logical block grid
 
@@ -33,12 +36,12 @@ measures common rows to common rows after preallocation. See the
 For P>1 the default call executes:
 
 1. Two `input_conversion` supersteps for A (send/pack, then receive/unpack).
-2. The same two supersteps for B; consumed input shards are released.
+2. The same two supersteps for B; row/tile storage is reused in place.
 3. `skew`: A_ij sends to (i,j-i), B_ij to (i-j,j), modulo q. Self-owned data stays local.
 4. q `multiply` steps: receive prior messages, accumulate A_ik B_kj, record 2b³
    FLOPs, then shift A left and B up except on the final round.
 5. Two `output_conversion` steps convert C to common row shards. A/B tiles
-   have been released before output conversion.
+   remain allocated alongside cached messages.
 
 Every received message is consumed in the following superstep. Conversion
 messages carry global row/column rectangles; skew and shift messages carry
@@ -66,7 +69,10 @@ S=5, C_total=1920 and C_crit=128. Tests independently verify these values.
 Use `count(trace)` for the complete common route and `count_native(trace)` for
 the same execution with only input/output conversion excluded. Skew, replication
 and reduction (where relevant to other layouts) remain part of native-body cost.
-This comparison uses identical actual dimensions and arithmetic.
+This comparison uses identical actual dimensions and arithmetic. Ordinary and
+retained common-input calls now have identical full traces and payload peaks.
+Cached allocated storage is counted even while idle. Historical allocation-based
+Cannon traces can have different peaks and should keep their recorded revision.
 
 `matmul_traced(..., native_layout=True)` and C++ `Cannon::run_native` provide an
 explicit native-input adapter for schedule tests. They do not pad and require
@@ -83,6 +89,8 @@ with a padded common execution, supply the same padded input size.
 - FP32 stage ordering depends on the padded layout. Validation compares against
   an independent FP64 oracle with the agreed tolerance, not universal bitwise equality.
 
-Node storage uses move-only tracked buffers and explicit messages. The algorithm
-object carries P/c without mutable execution state. Executed block triples and actual GEMM shapes are recorded by Node::multiply_add
-and can be checked with validate_coverage. The 1D/2.5D algorithms remain pending. See [framework milestones](../framework.md).
+Node storage uses move-only tracked buffers and explicit message operations.
+The compatibility algorithm object carries P/c without mutable execution state;
+its prepared workspace owns the buffers. Executed block triples and actual GEMM
+shapes are recorded by `PreparedBsp` during execution and checked by
+`validate_coverage`. The 1D/2.5D algorithms remain pending. See [framework milestones](../framework.md).

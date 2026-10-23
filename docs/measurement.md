@@ -84,8 +84,9 @@ not removed by fitting each matrix separately. A failed/partial directory has
 no completion manifest and does not establish a completed experiment.
 
 Prepared message caches remain allocated and counted while idle, so their peaks
-can differ from allocation-based convenience traces. Predictions and feasibility
-must use the trace from the same path. Prepared traces can be passed directly to
+are now identical for ordinary and retained Cannon calls using the same inputs
+and configuration. Earlier allocation-based traces can differ; keep their source
+revision and use actual captured peaks for predictions and feasibility. Prepared traces can be passed directly to
 `dmm model --traces <measurement_output>/traces` with matching cases/sizes/group/workers
 and a fresh model output path. That recomputes budget scans/charts without
 reloading matrices or rerunning algorithms. Measured medians remain in the

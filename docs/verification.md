@@ -3,6 +3,12 @@
 Runtime source: `270300d9bc621ed977460ba5dc948c0debfd2f16`; captured with a clean working tree.
 The later verification commit changes documentation and candidate labels/provenance in figures only.
 
+This is a historical record of that revision. Cannon has since been unified:
+ordinary calls and retained prepared calls now share one schedule and identical
+common-input payload peaks. The old allocation-based capture remains valid for
+its recorded source, but its memory values are not the current storage policy.
+See the [contribution guide](contribute.md) for the unified interface.
+
 ## Functional checks
 
 - Fresh Release build: **72 C++ tests passed**.

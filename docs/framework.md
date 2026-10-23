@@ -32,8 +32,10 @@ enumerating scalar n³ terms.
 message caches, tree collectives and common layout conversions. Cannon is its
 reference adapter. Tests verify no allocation on caller/worker threads, including
 the first execution, and recovery after an interrupted executor batch. Prepared
-and allocation-based routes use their own actual peaks; measurements and budgets
-must use the same route's trace.
+and ordinary Cannon calls execute this same plan and have identical full traces
+and payload peaks. New algorithms implement one prepared schedule and use the
+`PlannedAlgorithm` facade for ordinary calls. Historical allocation-based traces
+retain their original peaks and revision; budgets use the actual captured trace.
 
 [Model analysis](model.md) replays checked saved traces without loading matrices.
 [Prepared measurement](measurement.md) freezes independent local w/g/l before

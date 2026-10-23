@@ -1,13 +1,15 @@
 # Contributing an algorithm: follow Cannon
 
 Use the existing Cannon implementation as a worked example: start with its native
-algorithm, follow the Python binding, then add a prepared execution path and run
-both through the shared experiment tools. The project uses **C++20**. Computation
+execution plan, follow the Python binding, then run the same plan through ordinary
+calls and reusable prepared calls with the shared experiment tools. The project uses **C++20**. Computation
 belongs in C++; Python owns datasets, FP64 validation and experiment orchestration.
 
-A complete contribution provides ordinary multiplication, an executed trace and
-an allocation-free prepared adapter. A function that only returns the right C
-cannot yet participate in all model and measurement experiments.
+Write the algorithm schedule once in a prepared implementation. The framework's
+`PlannedAlgorithm<Prepared>` supplies ordinary `matmul` and `run` methods by
+creating a temporary prepared object. Keeping that object supplies repeated
+`run_into` calls. Both routes execute the same schedule and produce the same
+trace, including allocated payload peaks; do not maintain a second BSP loop.
 
 ## 1. Find the corresponding Cannon files
 
@@ -15,9 +17,9 @@ Paths in this guide are relative to the main repository, including `doc/`.
 
 | Cannon example | Responsibility when adding an algorithm |
 | --- | --- |
-| `include/dmm/cannon.hpp` | Declare the algorithm and check `TracedAlgorithm` |
-| `src/cannon.cpp` | Implement the common input/output route and native schedule |
-| `include/dmm/prepared.hpp`, `src/prepared.cpp` | Read `PreparedCannon` as the prepared-adapter example; put a new algorithm's adapter in its own header/source |
+| `include/dmm/cannon.hpp` | Existing Cannon compatibility facade; new algorithms can use a `PlannedAlgorithm<Prepared>` alias |
+| `src/cannon.cpp` | The sole Cannon schedule and host adapters, implemented by `PreparedCannon` |
+| `include/dmm/prepared.hpp`, `src/prepared.cpp` | Shared plan runtime, `run_once` and `PlannedAlgorithm`; put a new algorithm's prepared implementation in its own header/source |
 | `src/bindings.cpp` | Register NumPy entry points and the prepared object |
 | `python/dmm/algorithms/cannon.py` | Expose the four Python functions used by the runners |
 | `CMakeLists.txt` | Add native sources to `dmm_core` and tests to `dmm_tests` |
@@ -32,79 +34,99 @@ and algorithm documentation. The `ring` and `2.5d` names are already registered 
 `LAYOUT_MODULES` in `python/dmm/config.py`; they are still unimplemented. The CLI
 imports these modules dynamically, so adding them does not require a CLI branch.
 
-## 2. Declare the native contract
+## 2. Implement one prepared class and use the ordinary facade
 
-Cannon carries the case's P/c as configuration and borrows the supplied executor:
+A prepared implementation owns its input copies, tracked buffers and sealed
+`PreparedBsp`. It needs the following interface (shown with Cannon's public type):
 
 ```cpp
-struct Cannon {
-    std::size_t P = 16;
-    std::size_t c = 1;
-    Matrix<float> matmul(const Matrix<float>& a, const Matrix<float>& b,
-                         Executor& executor) const;
-    Traced run(const Matrix<float>& a, const Matrix<float>& b,
-               Executor& executor) const;
+class PreparedCannon {
+public:
+    PreparedCannon(Matrix<float> a, Matrix<float> b,
+                   std::size_t P = 16, std::size_t c = 1);
+    std::size_t size() const noexcept;
+    RunTimings run_into(std::span<float> output, Executor& executor);
+    Trace trace() const;
 };
-static_assert(TracedAlgorithm<Cannon>);
+
+using PlannedCannon = PlannedAlgorithm<PreparedCannon>;
+static_assert(TracedAlgorithm<PlannedCannon>);
 ```
 
-This is the required contract, excerpted from `include/dmm/cannon.hpp`.
-`matmul` returns `run(a,b,executor).product`; `run` returns `Traced{product,trace}`.
-No inheritance hierarchy or new worker pool is needed. P is the logical node
-count; it may exceed the physical worker count H.
+This interface excerpt omits private members. `size()` returns the original
+matrix side length, not the padded size; `run_into` writes exactly that many
+rows and columns to the caller's output. The alias is sufficient for a new
+algorithm's ordinary C++ API: use `PlannedAlgorithm<PreparedRing>` or
+`PlannedAlgorithm<PreparedTwoPointFiveD>`. The facade carries P/c, provides
+`matmul(a,b,executor)` and `run(a,b,executor)`, and borrows the supplied executor.
+No inheritance, custom ordinary loop or extra worker pool is needed.
 
-Cannon additionally has `run_native`, but that test adapter is optional for new
-algorithms. Obtain native-body metrics from `count_native(trace)` on the common
-route: it excludes only `input_conversion` and `output_conversion`.
-
-## 3. Build the traced algorithm from framework operations
-
-Follow `Cannon::run` in `src/cannon.cpp` in this order:
-
-1. Validate matching square storage, square P=q² and c=1.
-2. Construct `Bsp machine(P)`. `make_row_shards(machine,a)` pads to
-   `N=ceil(n/P)*P` and distributes N/P rows to each logical node.
-3. Call `rows_to_blocks(machine,executor,rows,1,tag)` for A and B. Release
-   consumed row buffers when they are no longer needed.
-4. Run the skew and q multiply steps in `multiply_blocks`. Each node accesses
-   its own buffers and communicates through `send`/`receive`.
-5. Call `blocks_to_rows` on C, then gather/crop the common row result.
-6. Finish the trace and set original/padded sizes and the coverage partition.
-
-Use tracked `Buffer` storage from `Bsp`/`Node` for node payload, packing and
-replicas. Do not let node tasks read other nodes' arrays or reload blocks from
-the full host input. Messages sent in one step must be consumed in the next;
-self-owned data stays local. Matrix messages need their actual global
-`ElementRegion{row,col,rows,cols}` and distinct destination/tag pairs per sender.
-Payload sizes are FP32 words, not bytes.
-
-Cannon's actual multiplication hook is:
+Existing `Cannon` keeps its old public type for compatibility. Its entire common
+`run` method now delegates to the same facade:
 
 ```cpp
-node.multiply_add({i, k, j, block, block, block},
-                  a[id], block, b[id], block, c[id], block);
+Traced Cannon::run(const Matrix<float>& a, const Matrix<float>& b,
+                   Executor& executor) const {
+    return PlannedAlgorithm<PreparedCannon>{P, c}.run(a, b, executor);
+}
 ```
 
-Here `k=(i+j+round)%q`. This calls the shared tile-32 GEMM and records successful
-work/coverage together. Do not add the same GEMM FLOPs with `compute`, write a
-private multiplication loop, change the shared tile or synthesize product
-records after execution. Reduction additions use `compute` without products;
-the shared tree-reduction helper already counts its additions.
+`PlannedAlgorithm::run` constructs the prepared object and uses the shared
+`run_once` helper to allocate a host output, call `run_into` once, and return
+`Traced{product,trace}`. `matmul` returns that product. Python `prepare` retains
+the prepared object instead. P is the logical node count and may exceed H.
+Ordinary calls still include plan construction/allocation in their outer timing;
+prepared measurement uses only the internal common-row-to-common-row timer.
 
-Cannon sets `n=left.size` (the padded size) and completes its metadata with:
+Cannon's optional `run_native` test adapter uses `run_once` with native block
+input/output adapters, skipping common conversions and padding. It shares the
+same skew/multiply builder. New algorithms do not need this optional entry:
+`count_native(trace)` already excludes common input/output conversion costs.
+
+## 3. Describe Cannon's schedule once
+
+Follow `PreparedCannon` in `src/cannon.cpp`:
+
+1. Validate matching finite square inputs, square P=q² and c=1. Pad common inputs
+   to `N=ceil(n/P)*P`; row ownership is N/P rows per logical node.
+2. Allocate node-owned A/B/C buffers and conversion scratch through
+   `PreparedBsp::allocate`. Ordinary and reused calls use these same buffers.
+3. Append `rows_to_blocks` operations for A and B using the shared prepared
+   conversion overloads.
+4. Append one skew step and q multiply steps. Link each send id to its receive
+   in the immediately following step, and omit outgoing shifts on the last round.
+5. Append `blocks_to_rows` for C and seal with `plan_.seal(n_original,N,{q,q,q})`.
+6. In `run_into`, reset common input rows, execute the sealed plan and gather/crop
+   C. Only `plan_.execute(executor)` defines the internal timing interval.
+
+Building the plan declares operations; executing it performs the actual copies
+and GEMMs and writes the preallocated trace records. A snapshot is available only
+after successful execution. Use these actual records with
+`validate_coverage(trace)` and the independent FP64 oracle.
+
+Cannon declares each local product in its sole round loop as follows:
 
 ```cpp
-trace.original_size = a.size;
-trace.padded_size = n;
-trace.coverage = {q, q, q};
+plan_.multiply_add(step, node, {i, k, j, block, block, block},
+                   v(left_[node]), v(right_[node]), v(result_[node]));
 ```
 
-Run `validate_coverage(trace)` alongside the independent FP64 correctness check.
-For a row ring the partition is `{P,P,1}`; for 2.5D it is `{q,q,q}` across all
-layers. Ring already uses the common row layout. 2.5D uses the shared base-layer
-conversions, tree broadcasts and tree reduction back to layer 0. Do not copy
-Cannon's square-grid validation into ring: ring only requires positive P and c=1.
-See the [C++ API](api/cpp.md) for exact buffer, collective and conversion contracts.
+Here `k=(i+j+round)%q`, and `v(id)` constructs `BufferView{id,0,block}`.
+The runtime invokes the shared tile-32 GEMM and records successful work/coverage
+together. Do not write another multiplication loop, charge the same GEMM twice
+or synthesize product records from expected loop counts. The shared tree-reduction
+helper already counts its additions.
+
+Node payload, packing and replicas must use tracked buffers. A view belongs to
+its node; cross-node transfers use declared sends/receives. Matrix messages need
+an actual global `ElementRegion{row,col,rows,cols}` and distinct destination/tag
+pairs per sender. Payload sizes and strides use FP32 words, not bytes.
+
+For a row ring the coverage partition is `{P,P,1}` and the native layout is
+already common rows. For 2.5D it is `{q,q,q}` across all layers; use prepared
+base-layer conversions, tree broadcasts and tree reduction back to layer 0.
+Do not copy Cannon's square-grid validation into ring: ring requires positive
+P and c=1. See the [C++ API](api/cpp.md) for exact operation contracts.
 
 ## 4. Register bindings and expose Python entry points
 
@@ -139,10 +161,11 @@ Cannon's other three functions forward to `_native.cannon`,
 calls `prepare`, then the prepared object's `run_into` and `trace`. Keep I/O,
 oracle computation, parameter fitting and report generation out of these wrappers.
 
-## 5. Add the prepared execution path
+## 5. Keep preparation outside the measured execution
 
-Read `PreparedCannon` in `src/prepared.cpp`. It declares operations once on
-`PreparedBsp`, then seals the plan. A new adapter uses the same public operations:
+The same `PreparedCannon` in `src/cannon.cpp` serves every entry point; there is
+no second algorithm implementation to add. It declares operations once on
+`PreparedBsp`, then seals the plan. Use its public operations:
 `allocate`, `step`, `zero`, `copy`, `send`, `receive` and `multiply_add`.
 `BufferView{buffer,offset,stride}` identifies local storage; sends return message
 ids for matching next-step receives. Shared tree collectives and row/block
@@ -158,9 +181,10 @@ node payload, including retained message caches, remains counted in memory peaks
 
 The fixed phase names are `input_conversion`, `skew`, `replication`, `multiply`,
 `reduction`, `output_conversion`. Return the framework's end-to-end and six-phase
-timing structure. Prepared and ordinary routes should agree on outputs and
-work/message schedules; their storage peaks can differ and must be reported
-separately. See [prepared measurement](measurement.md) for timing components.
+timing structure. For identical inputs/P/c, ordinary and retained calls must have
+identical outputs and full traces, including per-step/global payload peaks.
+Native-input test adapters can retain different storage from common-input plans.
+See [prepared measurement](measurement.md) for timing components.
 
 ## 6. Try the complete Cannon API
 
@@ -195,7 +219,9 @@ with SerialExecutor() as executor:
         output.fill(np.nan)
         timings = prepared.run_into(output, executor)
         np.testing.assert_allclose(output, reference, atol=1e-4, rtol=1e-3)
-        validate_coverage(prepared.trace())
+        prepared_trace = prepared.trace()
+        validate_coverage(prepared_trace)
+        assert count(prepared_trace).peak_words == count(trace).peak_words
         assert timings.end_to_end.total > 0
 ```
 
@@ -272,6 +298,8 @@ inputs, padding/cropping (including 17,65,257), invalid configurations, input
 preservation, output ownership, read-only/strided inputs and repeated calls.
 Exercise serial and threaded executors, including P>H. Add hand-counted work and
 message-route tests and prove each executed product triple occurs exactly once.
+Compare ordinary calls with first and repeated retained calls: the complete trace,
+including regions, coverage, work, communication and memory, must match.
 For Cannon, n=16/P=16 gives S=11, F_total=8192, C_total=2496 and C_crit=164 on the
 common route; see its [count derivation](algorithms/cannon.md#hand-computed-communication-counts).
 Use your own algorithm's expected schedule, not these Cannon constants.

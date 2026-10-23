@@ -104,9 +104,11 @@ product into NumPy. All these copies are inside the measured call.
 The C++ abstract `Executor` exposes synchronous `for_each(count, task)`.
 Each task receives its index. The call returns after all tasks complete and
 propagates errors. Algorithm code borrows the executor and does not start or
-close it. The BSP runtime submits one batch per superstep, with one task per
-logical node, and delivers messages on the caller between batches; Cannon
-therefore submits q+7 batches of P tasks on the common route for P>1.
+close it. The low-level `Bsp` submits one batch per superstep. Cannon now uses
+`PreparedBsp` for both ordinary and retained calls: each logical step has three
+blocking batches (local/received copies, GEMMs, outgoing copies), each with P
+tasks. The common route for P>1 has q+7 logical supersteps and 3(q+7) batches;
+batch count does not replace logical S in the cost model.
 
 | Executor | Behavior |
 | --- | --- |
