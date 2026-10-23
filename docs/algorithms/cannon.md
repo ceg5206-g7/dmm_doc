@@ -23,7 +23,10 @@ After multiplication, C blocks convert back to the same row distribution; the
 host output adapter gathers and crops only after the common row-shard result
 exists. Host array copies are outside logical-node communication counts, while
 the current convenience matmul timing includes those copies and allocation.
-The preallocated measurement path is a remaining milestone.
+The prepared adapter is implemented as `PreparedCannon`; its internal timer
+measures common rows to common rows after preallocation. See the
+[contribution walkthrough](../contribute.md) and
+[measurement protocol](../measurement.md) for setup and timing boundaries.
 
 ## Supersteps and message routes
 
