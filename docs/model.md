@@ -83,7 +83,8 @@ no feasible candidate explicitly say infeasible.
 
 - `model.csv`: one end-to-end row per candidate/gamma/lambda. Columns include
   n, n_padded, P, H, layout, c, phase, F_total, W_crit, C_total, C_crit, S,
-  peak_words, messages, gamma, lambda, T_model, t_measured. t_measured is empty.
+  peak_words, messages, gamma, lambda, T_model, t_measured, gflops, speedup,
+  parallel_efficiency. The measured time and three performance fields stay empty.
 - `phase_model.csv`: per-phase and native-body costs from the same execution.
 - `layout_selection.csv`: budget cap, feasible/infeasible candidates and all
   minimum-cost native/end-to-end choices.

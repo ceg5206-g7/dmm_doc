@@ -245,7 +245,7 @@ budgets: [8, 32]
 data_dir: ../data_contribute
 output_dir: ../results/measure_contribute
 cases:
-  - {layout: cannon, P: 4, c: 1}
+  - {layout: cannon, P: 1, c: 1}
 sizes: [17, 65]
 group: 0
 workers: 0
@@ -260,6 +260,11 @@ uv run --locked dmm generate --config configs/dataset_contribute.yaml
 uv run --locked dmm model --config configs/model_contribute.yaml
 uv run --locked dmm measure --config configs/measure_contribute.yaml
 ```
+
+The measurement smoke uses P=1/H=1. Model capture covers P=4/16 conversions
+with batched execution. Formal `measure` runs reject P>H. For four-core parallel
+measurements use P=4/H=4 and pass a completed P=1/H=1 report with `--baseline`
+as described in the [measurement guide](measurement.md).
 
 Model capture must produce validated traces, correctness metrics and model/budget
 CSVs and figures. Measurement must produce raw samples, frozen calibration,

@@ -1,5 +1,32 @@
 # Framework verification record
 
+## Formal measurement bounds and performance metrics (2026-10-23)
+
+Formal `measure` now enforces P<=H before dataset access or output creation.
+P>H remains available through the runtime and model/counting pipeline.
+End-to-end measured rows report useful GFLOP/s, speedup against an explicit
+same-layout P=1/H=1 serial measurement, and efficiency=speedup/H. Baseline
+input/build/protocol/checksum mismatches are rejected; missing baselines and
+model-only reports leave comparison fields blank.
+
+- **507 Python/documentation tests passed**; strict MkDocs build passed.
+- Tests cover early oversubscription rejection, real-H efficiency, original-n
+  throughput under padding, missing/partial baselines, mismatched inputs,
+  incompatible host/build/protocol, damaged reports and CLI baseline forwarding.
+- Actual CLI validation used n=256/512/1024, seed 5206, group 0, range [-1,1].
+  Serial P=1/H=1 and threaded P=4/H=4 each ran five warmups and fifteen repeats,
+  with independent calibration and FP64 checks. Together they produced 630
+  phase/end-to-end sample rows. All three performance formulas were checked
+  against the saved measured medians.
+- A P=16/H=4 measurement was rejected with no output directory. Offline model
+  replay of the threaded traces succeeded without matrices and left measured
+  performance columns blank.
+
+Artifacts are retained locally under
+`/var/folders/lw/j9_lmxtd6gx45dln0mlczmn80000gn/T/dmm-performance-q_1o1mci/`.
+These runs verify the reporting pipeline and formulas; no fixed speedup is assumed.
+The C++ runtime and teammate algorithm scope are unchanged.
+
 ## Endpoint-matched DSL and code organization (2026-10-23)
 
 The migration based on main revision `d3733ad` replaces public tags/message IDs

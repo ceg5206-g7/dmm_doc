@@ -2,7 +2,7 @@
 
 ```sh
 uv run dmm measure --config configs/measure_serial.yaml
-uv run dmm measure --config configs/measure_threaded.yaml
+uv run dmm measure --config configs/measure_threaded.yaml --baseline results/measure_serial
 ```
 
 The profiles use existing group-0 matrices at n=256,512,1024. The serial profile
@@ -11,6 +11,18 @@ at least four physical cores are detected. Use a fresh output directory. Neither
 input datasets nor existing reports are overwritten. Missing teammate algorithms
 fail preflight. Profiles accept per-case layout/P/c, one shared worker count,
 group, sizes, warmups and repeats. Defaults are five warmups and fifteen repeats.
+Every case must satisfy **P <= H**, with serial H=1. Oversubscribed cases fail
+before loading matrices, calibration or output creation; use `dmm model` for
+P>H correctness/counting. The runtime still supports batched P>H execution.
+
+`--baseline` resolves relative to the shell's working directory and names a
+completed serial P=1/H=1 **measurement** directory. Run the serial command first.
+The baseline must use the same host/build/CPU affinity, executable extension and
+measurement implementation, group and warmup/repeat counts. Reports store and
+check implementation hashes, report/trace checksums and the actual A/B hashes.
+Changing code or rebuilding the extension requires a fresh baseline. Old reports
+without implementation hashes must be recaptured. `bench` timings include
+allocation and cannot be used as these baselines.
 
 ## Measurement boundary and statistics
 
@@ -32,8 +44,8 @@ CSV: that command intentionally includes wrappers and allocation.
 End-to-end and six phases report total, compute, copy and scheduling/synchronization
 seconds. Each of three blocking batches measures per-node task times; their
 maximum is the local compute/copy component. The remaining wall time includes
-scheduler and instrumentation overhead. If P>H, it also includes batching of
-logical nodes. Fused receive-and-sum is counted as FLOPs but timed in the copy
+scheduler and instrumentation overhead. Formal measurements enforce P<=H.
+Fused receive-and-sum is counted as FLOPs but timed in the copy
 bucket. Phase medians are independent statistics and need not add up to the
 median whole execution. Native totals sum each repetition's phase times excluding
 only input/output conversion before computing median/IQR. Linear quartiles use
@@ -71,6 +83,8 @@ message emulator; they do not measure a real distributed network.
 - `samples.csv`: every repetition's end-to-end/six-phase timing components.
 - `measured_model.csv`: actual trace counts/peaks, median/IQR components, measured
   median, normalized `T_model`, predicted seconds and signed/relative residuals.
+  End-to-end rows additionally contain `gflops`, `speedup`, `parallel_efficiency`,
+  `baseline_time_s`, `baseline_P`, `baseline_H` and `baseline_source`.
 - `correctness.csv`: maximum absolute/Frobenius relative error per measured repeat.
 - `traces/`: executed prepared traces and complete, checksummed capture manifest.
 - `heldout_residuals.png`: measured vs predicted end-to-end costs and signed residuals.
@@ -92,6 +106,31 @@ revision and use actual captured peaks for predictions and feasibility. Prepared
 and a fresh model output path. That recomputes budget scans/charts without
 reloading matrices or rerunning algorithms. Measured medians remain in the
 measurement report; hypothetical gamma/lambda sweeps keep t_measured empty.
+
+## Measured throughput and parallel efficiency
+
+Only `end_to_end` rows report these metrics. All phases and the native subtotal
+leave them blank, avoiding a full-product numerator on a conversion-only stage.
+With t the measured end-to-end median:
+
+```text
+gflops = 2*n_original^3 / (1e9*t)
+speedup = serial_P1_H1_median / t
+parallel_efficiency = speedup / H
+```
+
+The numerator is useful original work, so padding overhead remains in t. Efficiency
+is a fraction (0.75 means 75%); it is not clamped when noisy/cache-sensitive
+measurements exceed one. The shared-kernel P=1 baseline is explicitly identified,
+so this comparison includes the P-dependent layout/conversion costs.
+
+A serial P=1/H=1 row uses its own measured median and reports speedup/efficiency
+one, with baseline_source=self. Threaded rows use only the explicitly supplied
+baseline for the same layout, n and c, with matching inputs. Missing layouts/sizes
+or no `--baseline` leave speedup/efficiency and baseline fields blank; GFLOP/s
+still uses the real measured time. The manifest records the external baseline
+path/hash and formulas. Pure `dmm model` reports leave all three performance
+fields and `t_measured` blank, including offline replay of measurement traces.
 
 ## Remaining integration gate
 
