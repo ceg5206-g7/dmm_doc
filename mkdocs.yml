@@ -12,6 +12,8 @@ nav:
   - Trace and model analysis: model.md
   - Prepared measurement and calibration: measurement.md
   - Verification record: verification.md
+  - Case conclusions:
+      - Cannon: conclusion/cannon.md
   - API reference:
       - Python: api/index.md
       - C++: api/cpp.md

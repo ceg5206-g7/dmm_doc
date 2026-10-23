@@ -1,5 +1,8 @@
 # Cannon's Algorithm
 
+For interpretation of the captured results against the proposal, see
+[Cannon's case conclusions](../conclusion/cannon.md).
+
 The Python entry points are `matmul`, `matmul_traced` and `prepare` in
 `python/dmm/algorithms/cannon.py`. `src/algorithms/cannon.cpp` contains one Cannon schedule,
 declared by `MatmulDefinition build_cannon(BspPlan&, const MatmulConfig&)`. The shared `PreparedMatmul`

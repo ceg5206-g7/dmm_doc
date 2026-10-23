@@ -337,6 +337,13 @@ uv run --locked pytest -q tests/python doc/tests
 ```
 
 Update the algorithm page, `doc/mkdocs.yml` and status overview only after
-verification. Commit `doc/` first, then source/tests/configs and the updated
+verification. After capturing experiment results, add one
+`doc/docs/conclusion/<algorithm>.md` page using the same filename stem as the
+algorithm page. Follow [Cannon's conclusions](conclusion/cannon.md): answer the
+proposal's communication, conversion, memory and model questions with actual
+evidence, and identify comparison questions still pending other layouts.
+Add that page under **Case conclusions** in navigation.
+
+Commit `doc/` first, then source/tests/configs and the updated
 submodule pointer in the parent repository. Both teammate algorithms must be
 implemented before running the full 24-configuration/192-scenario comparison.

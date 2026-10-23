@@ -17,6 +17,7 @@ Local and message payload memory peaks are tracked per node. 1D ring, replicated
 | [System design](design.md) | Python/C++ responsibilities, BSP communication model, binding and executors |
 | [Algorithms](algorithms/overview.md) | Availability, Cannon's supersteps, message routes and counts |
 | [Experiment methodology](experiments.md) | Timing, validation, averaging and reproducibility |
+| [Case conclusions: Cannon](conclusion/cannon.md) | Answers to the proposal's cost, memory, conversion and model questions |
 | [Python API](api/index.md) | Module pages generated from the current package |
 | [C++ API](api/cpp.md) | Matrix templates, BSP runtime, traces and costs, algorithms and executors |
 | [Adding an algorithm](contribute.md) | Implementation, integration and verification |
