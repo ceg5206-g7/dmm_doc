@@ -33,7 +33,7 @@ message caches, tree collectives and common layout conversions. Cannon is its
 reference adapter. Tests verify no allocation on caller/worker threads, including
 the first execution, and recovery after an interrupted executor batch. Prepared
 and ordinary Cannon calls execute this same plan and have identical full traces
-and payload peaks. New algorithms implement one `build_xxx(BspPlan&,MatmulLayout&)` function; the
+and payload peaks. New algorithms implement one `MatmulDefinition build_xxx(BspPlan&, const MatmulConfig&)` function; the
 common `PreparedMatmul` owns reset, execution, cropping, locking and timing. Historical allocation-based traces
 retain their original peaks and revision; budgets use the actual captured trace.
 

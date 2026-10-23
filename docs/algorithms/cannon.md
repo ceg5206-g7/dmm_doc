@@ -1,8 +1,8 @@
 # Cannon's Algorithm
 
 The Python entry points are `matmul`, `matmul_traced` and `prepare` in
-`python/dmm/algorithms/cannon.py`. `src/cannon.cpp` contains one Cannon schedule,
-declared by `build_cannon(BspPlan&,MatmulLayout&)`. The shared `PreparedMatmul`
+`python/dmm/algorithms/cannon.py`. `src/algorithms/cannon.cpp` contains one Cannon schedule,
+declared by `MatmulDefinition build_cannon(BspPlan&, const MatmulConfig&)`. The shared `PreparedMatmul`
 owns input/output and execution lifecycle. Ordinary calls create a temporary
 workspace; `prepare` retains the same object for repeated execution. All arithmetic uses the shared blocked
 `gemm_add` kernel (tile 32).
@@ -37,7 +37,7 @@ For P>1 the default call executes:
 
 1. Two `input_conversion` supersteps for A (send/pack, then receive/unpack).
 2. The same two supersteps for B; row/tile storage is reused in place.
-3. `skew`: A_ij sends to (i,j-i), B_ij to (i-j,j), modulo q. Self-owned data stays local.
+3. `skew`: zero C, then A_ij sends to (i,j-i), B_ij to (i-j,j), modulo q. Self-owned data stays local.
 4. q `multiply` steps: receive prior messages, accumulate A_ik B_kj, record 2b³
    FLOPs, then shift A left and B up except on the final round.
 5. Two `output_conversion` steps convert C to common row shards. A/B tiles
@@ -87,7 +87,7 @@ native-input adapter; schedule tests inspect the corresponding phases directly.
   an independent FP64 oracle with the agreed tolerance, not universal bitwise equality.
 
 Node storage uses move-only tracked buffers and explicit message operations.
-The compatibility algorithm object carries P/c without mutable execution state;
-its prepared workspace owns the buffers. Executed block triples and actual GEMM
+The builder receives immutable P/c; the common workspace owns all buffers.
+Source-node formulas match next-step receives without tags or incoming-message tables. Executed block triples and actual GEMM
 shapes are recorded by `BspPlan` during execution and checked by
 `validate_coverage`. The 1D/2.5D algorithms remain pending. See [framework milestones](../framework.md).

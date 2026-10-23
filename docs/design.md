@@ -21,14 +21,17 @@ flowchart TD
 | Files | Responsibility |
 | --- | --- |
 | `matmul.hpp`, `src/matmul.cpp` | Common input ownership, reset, cropped output, locking and lifecycle |
-| `bsp_plan.hpp`, `src/bsp_plan.cpp` | Build, validate and interpret superstep operations |
-| `src/cannon.cpp` | Cannon's buffer declarations and schedule |
-| `sharding.hpp`, `collectives.hpp` | Shared layout conversions and fixed binary trees |
-| `bsp.hpp`, `src/bsp.cpp`, `coverage.cpp` | Trace types, critical counts, cost and coverage validation |
+| `plan.hpp`, `src/plan_build.cpp` | Public DSL, typed views, validation and endpoint matching |
+| `src/plan_execute.cpp` | Interpret finalized operations through the executor |
+| `algorithms.hpp`, `src/algorithms/` | Builder declarations, selection and each algorithm's schedule |
+| `redistribution.hpp`, `collectives.hpp` | Shared row/tile conversions and fixed binary trees |
+| `trace.hpp`, `src/trace.cpp`, `validation.hpp`, `src/validation.cpp` | Executed records, counts, costs, coverage and FP64 checks |
+| `detail/gemm.hpp`, `detail/memory.hpp` | Internal common kernel and tracked payload storage |
 | `execution.hpp`, `src/execution.cpp` | Synchronous serial execution and persistent thread pool |
 | `src/bindings.cpp`, `python/dmm/matmul.py` | Common NumPy/binding entry points |
 | `python/dmm/config.py`, `datasets.py` | YAML cases, shared FP32 data and independent FP64 oracle |
-| `python/dmm/model.py`, `measurement.py` | Model replay and prepared measurement/calibration |
+| `python/dmm/trace.py` | Serialization, saved-trace validation, manifest checks and offline loading |
+| `python/dmm/model.py`, `measurement.py` | Model scenarios and prepared calibration/measurements |
 | `python/dmm/benchmark.py`, `analysis.py` | Convenience API timing and summary/plots |
 
 ## Dataset and algorithm boundaries
@@ -37,34 +40,46 @@ Each case explicitly supplies layout, P and c. P logical nodes are independent
 of H physical worker threads. Only Cannon is implemented; missing teammate
 layouts fail before execution.
 
-A builder has the ordinary function signature
-`void build_xxx(BspPlan&, MatmulLayout&)`. It receives the padded size and P/c,
-allocates its node buffers, binds `layout.a`, `layout.b` and `layout.result` to
-common row-shard storage, sets coverage and appends operations. A row buffer can
-have extra capacity and be reused as a native tile. This preserves Cannon's
-in-place conversions and payload peaks. The builder does not restore input,
-collect output, acquire locks, call an executor or generate CSVs.
+A builder has signature
+`MatmulDefinition build_xxx(BspPlan&, const MatmulConfig&)`. It receives immutable
+padded_size/P/c, allocates owned buffers and returns three row-view lists and a
+product grid. Names describe their boundaries: `input_a_rows`, `input_b_rows`,
+`output_c_rows`. Each view has shape N/P×N; native tiles can reuse that storage
+or extra capacity. The builder declares operations in sequence and returns. It
+does not restore input, gather output, finalize, execute or generate reports.
 
 `PreparedMatmul` owns input copies and the completed plan. Construction validates
-inputs, invokes the builder and seals the plan. Each `run_into` restores inputs,
-executes the sealed plan, then gathers/crops the output. C zeroing is declared
+inputs, invokes the builder and finalizes the plan. Each `run_into` restores inputs,
+executes the finalized plan, then gathers/crops the output. C zeroing is declared
 inside the plan and executes on every call. `trace()` requires a successful run;
 a failed execution invalidates the snapshot until a successful retry.
 
 Ordinary calls create this same workspace temporarily. Prepared calls retain it.
 Both use identical schedules, communication, coverage and memory accounting.
-The legacy C++ `Cannon` facade and Python `algorithms.cannon` module are thin
-wrappers; new algorithms do not need corresponding workspace classes.
+Python's `algorithms.cannon` module forwards to the shared API. The C++ entry
+points select a builder in `src/algorithms/registry.cpp`; new algorithms add one
+function, with no per-algorithm class or duplicate execution path.
 
 ## Communication model
 
-`BspPlan` records `zero`, local `copy`, `receive`, `multiply_add` and `send`.
-`seal` validates the schedule and prepares cached message slots. Execution
-interprets the operation lists; it does not generate native code. Each logical
-superstep has three blocking executor batches: local/received copies, kernels,
-then outgoing copies. Every message is received exactly once in the immediately
-following superstep. Self-owned data stays local. Foreign storage, duplicate
-messages, incorrect views and undrained messages are rejected.
+`BspPlan` creates checked views and appends `Superstep` handles. The handles
+register `add_zero`, `add_copy`, `add_receive`, `add_receive_sum`, `add_gemm` and
+`add_send`. Each node's copies precede GEMMs, then sends; only the newest step
+can be extended. This prevents an apparently sequential declaration from being
+silently reordered by execution batches.
+
+Source and destination ownership determine message endpoints. Matching uses the
+sending step and ordered node pair, with one logical message per pair per step
+and exactly one receive in the next step. Several components share one ordered
+bundle. There are no public tags or message IDs. Component shapes/order are
+validated at finalization; global origins annotate trace regions only. Equal
+shapes cannot reveal swapped semantic components, so A/B ordering remains an
+explicit positional contract. See the [C++ examples](api/cpp.md#bsp-operation-plan).
+
+Finalization validates the schedule and prepares cached slots. The interpreter
+executes three blocking batches per step: copies/receives, kernels, sends. All
+cross-node payloads are copied; self-owned data stays local. Execution generates
+actual trace records. It does not generate native code.
 
 The model uses
 

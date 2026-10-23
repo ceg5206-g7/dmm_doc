@@ -36,7 +36,7 @@ def test_pydoc_reference_covers_modules_and_public_api():
     references = json.loads(result.stdout)
     for module in ("dmm", "dmm.config", "dmm.datasets", "dmm.execution",
                    "dmm.benchmark", "dmm.analysis", "dmm.cli",
-                   "dmm.algorithms", "dmm.algorithms.cannon", "dmm.matmul", "dmm.bsp", "dmm._native"):
+                   "dmm.algorithms", "dmm.algorithms.cannon", "dmm.matmul", "dmm.trace", "dmm.bsp", "dmm._native"):
         assert f"{module}.html" in references
     pages = {name: Page(html) for name, html in references.items() if name.endswith(".html")}
     cannon = pages["dmm.algorithms.cannon.html"]

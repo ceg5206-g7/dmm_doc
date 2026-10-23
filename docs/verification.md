@@ -1,6 +1,36 @@
 # Framework verification record
 
-## Unified operation-plan runtime (2026-10-23)
+## Endpoint-matched DSL and code organization (2026-10-23)
+
+The migration based on main revision `d3733ad` replaces public tags/message IDs
+with next-step endpoint matching and ordered payload components. `plan.hpp`
+contains the DSL, `plan_build.cpp` validates it, and `plan_execute.cpp` interprets
+it. `src/algorithms/` contains builders and selection; config is immutable and
+builders return row bindings. The old Cannon facade and Algorithm concept are
+removed. Python trace I/O/validation now lives in `dmm.trace`.
+
+- Debug and Release: **77 C++ tests passed in each build**.
+- Python and documentation: **488 tests passed**; strict MkDocs build passed.
+- New protocol cases cover ordered multicomponent messages, strided views,
+  source overwrite after send, shape/arity/adjacency checks, duplicate pairs,
+  plan-scoped handles, operation order and stale superstep rejection.
+- First/repeated allocation-free execution, memory peaks, tree counts, c=4
+  redistribution, common lifecycle, FP64 correctness and failure/retry passed.
+- Actual CLI smoke: n=17/65, P=4/16, serial, c=1, seed 5206, group 0, range [-1,1].
+  Generation, model capture, independent calibration, five warmups and fifteen
+  repetitions passed (four configurations, 420 phase/end-to-end sample rows).
+- Offline model replay passed using new schema-2 measurement traces with a
+  nonexistent input path. The previous real schema-1 CLI capture also replayed
+  successfully without matrices. A committed pre-migration real trace fixture
+  separately checks historical loading/counts without algorithm execution.
+
+Artifacts are local temporary files under
+`/var/folders/lw/j9_lmxtd6gx45dln0mlczmn80000gn/T/dmm-dsl-smoke-dkpxx9ro/`.
+These verify integration, not performance rankings. Historical traces preserve
+their recorded peaks/provenance; new records use ordered `regions` arrays.
+Ring/2.5D and the full comparison remain assigned to teammates.
+
+## Historical unified operation-plan runtime (2026-10-23)
 
 The simplification based on main revision `c5ca662` removes the callback BSP
 runtime and per-layout prepared classes. `build_cannon` declares operations;

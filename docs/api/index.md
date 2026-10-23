@@ -8,8 +8,8 @@ Newly added modules are discovered automatically.
 
 The `dmm._native` page documents bound C++ executors, the common `prepare`, `matmul` and
 `matmul_traced` functions and shared `PreparedMatmul` class and the read-only BSP trace records. `dmm.execution`
-re-exports the executor classes directly; `dmm.bsp` re-exports `Trace`,
-`SuperstepRecord`, `MessageRecord`, `Counts`, `count` and `bsp_cost`. The native C++
+re-exports the executor classes directly; `dmm.trace` exposes `Trace`,
+`SuperstepRecord`, `MessageRecord`, `Counts`, `count` and `bsp_cost`. `dmm.bsp` retains compatibility re-exports. The native C++
 matrix and algorithm interfaces are described in the [C++ reference](cpp.md).
 
 Edit the source docstrings to change this reference; the generated HTML pages

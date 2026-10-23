@@ -22,11 +22,21 @@ capture duration is placed in a measurement column.
 The trace directory contains:
 
 - One JSON per n/layout/P/c with original/padded dimensions, H, per-node FLOPs,
-  message endpoints/tags/word counts/element rectangles, actual product records,
+  message endpoints/word counts/ordered component rectangles, actual product records,
   per-step/node peaks, correctness metrics and input content hashes.
 - `correctness.csv` with one numerical summary per real configuration.
 - A completion manifest with the exact ordered case/size selection, dataset
   manifest, compiler/build type, Git revision/dirty state and file checksums.
+
+New captures use trace schema **2**: each logical message has `source`,
+`destination`, `words`, and a nonempty `regions` list in payload order. There is
+one message per ordered node pair per sending step, and words equals the sum of
+component areas. No tag participates in matching. Schema **1** historical traces
+with `tag` and a single `region` remain readable; their original counts, peaks
+and provenance are preserved. The completion manifest stays schema 1, separately
+versioned from its trace files. `python/dmm/trace.py` owns serialization,
+independent validation and hash-checked loading; model and measurement share it.
+A real pre-migration schema-1 Cannon fixture is tested through offline replay.
 
 A failed capture may leave partial files. Without a complete manifest and every
 expected trace, model analysis refuses to proceed. Missing algorithms fail

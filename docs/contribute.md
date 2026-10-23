@@ -8,81 +8,130 @@ second prepared class or a separate ordinary multiplication loop.
 
 ## 1. Files and responsibilities
 
-Cannon is the worked example:
-
 | File | Responsibility |
 | --- | --- |
-| `include/dmm/cannon.hpp` | Declare `build_cannon(BspPlan&,MatmulLayout&)`; the existing `Cannon` facade is compatibility only |
-| `src/cannon.cpp` | Allocate/bind buffers and declare Cannon's schedule |
-| `include/dmm/matmul.hpp`, `src/matmul.cpp` | Shared workspace lifecycle for all layouts |
-| `include/dmm/bsp_plan.hpp`, `src/bsp_plan.cpp` | Single operation interpreter and plan validation |
-| `src/bindings.cpp` | Shared prepare/matmul/output protocol; select the layout's builder |
-| `python/dmm/matmul.py` | Common Python API |
+| `include/dmm/algorithms.hpp` | Declare algorithm builder functions |
+| `src/algorithms/cannon.cpp` | Allocate/bind buffers and declare Cannon's schedule |
+| `src/algorithms/registry.cpp` | Select a builder by layout name; common ordinary entry points |
+| `include/dmm/matmul.hpp`, `src/matmul.cpp` | Shared workspace lifecycle |
+| `include/dmm/plan.hpp`, `src/plan_build.cpp`, `src/plan_execute.cpp` | DSL, validation and execution |
+| `include/dmm/redistribution.hpp`, `include/dmm/collectives.hpp` | Shared conversion and tree-building helpers |
+| `src/bindings.cpp`, `python/dmm/matmul.py` | Common binding/NumPy protocol |
 | `python/dmm/algorithms/cannon.py` | Thin forwarding functions for runner discovery |
 
-For ring add `include/dmm/ring.hpp`, `src/ring.cpp`, corresponding C++/Python
-tests, `python/dmm/algorithms/ring.py` and `doc/docs/algorithms/ring.md`.
-For 2.5D use `two_point_five_d` in those filenames. Coordinate CMake source/test
-registration, the small builder switch in `src/bindings.cpp`, and documentation
-navigation. Layout module names are already registered in `config.py`.
-Neither new layout needs a workspace class, new bound class or its own NumPy
-validation/output implementation.
+For ring add `src/algorithms/ring.cpp`, C++/Python tests,
+`python/dmm/algorithms/ring.py` and an algorithm documentation page.
+Use `two_point_five_d` in the corresponding 2.5D filenames. Declare the builder
+in `algorithms.hpp`, register it in `src/algorithms/registry.cpp`, add the source
+and tests to CMake, and update documentation navigation. Layout module names
+are already registered in `config.py`. New layouts use the existing bindings,
+prepared class, common NumPy conversion and output validation.
 
-## 2. Declare buffers and build the Cannon plan
+Tests follow responsibilities: `test_plan.cpp`, `test_matmul.cpp`,
+`test_collectives.cpp`, `test_redistribution.cpp`, `test_trace.cpp`,
+`test_validation.cpp` and one `test_<algorithm>.cpp` per algorithm.
 
-The extension contract is:
+## 2. Build the Cannon plan
+
+The only extension interface is:
 
 ```cpp
-void build_cannon(BspPlan& plan, MatmulLayout& layout);
+MatmulDefinition build_cannon(BspPlan& plan, const MatmulConfig& config);
 ```
 
-`layout.n` is the padded size; `layout.P` and `layout.c` are immutable case
-parameters. The builder fills three lists: `a`, `b`, `result`, one owned buffer
-ID per node, capacity at least n²/P. These buffers contain common row shards
-at the start/end of execution. Native tiles can reuse the same capacity. The
-builder also sets `layout.coverage` and declares every required C zeroing step.
-The framework seals the plan after validating these bindings.
+`config` contains immutable `padded_size`, `P` and `c`. Return one MatrixView per
+node for `input_a_rows`, `input_b_rows` and `output_c_rows`, each N/P×N with the
+correct owner and distinct A/B/C buffers; return `product_grid={q,q,q}`. The
+workspace fills these inputs before execution and gathers the output afterwards.
+All other algorithm work is declared in the plan. Allocation happens while
+building; `add_*` registers work to execute later.
 
-Cannon validates P=q², c=1, then allocates one b×b A/B/C tile per node, where
-b=n/q. Its common row shards fit in the same buffers, so conversion uses
-separate h×b scratch (h=n/P). This preserves its existing payload memory count.
-
-A representative excerpt from `src/cannon.cpp` is:
+Cannon reuses tile buffers for common rows. Each has b²=N²/P words; separate h×b
+scratch preserves self segments during in-place conversion. This is the complete
+implementation in `src/algorithms/cannon.cpp`:
 
 ```cpp
-auto& left = layout.a;
-auto& right = layout.b;
-auto& result = layout.result;
-for (std::size_t node = 0; node < P; ++node) {
-    left.push_back(plan.allocate(node, block * block));
-    right.push_back(plan.allocate(node, block * block));
-    result.push_back(plan.allocate(node, block * block));
-    if (P > 1) scratch.push_back(plan.allocate(node, height * block));
+#include "dmm/algorithms.hpp"
+#include "dmm/redistribution.hpp"
+
+namespace dmm {
+MatmulDefinition build_cannon(BspPlan& plan, const MatmulConfig& config) {
+    if (config.c != 1)
+        throw std::invalid_argument("Cannon requires c = 1");
+    const auto N = config.padded_size, P = config.P, q = grid_size(P);
+    if (!N || N % P || plan.nodes() != P)
+        throw std::invalid_argument("invalid Cannon configuration");
+    const auto block = N / q, height = N / P;
+    std::vector<MatrixView> A(P), B(P), C(P), scratch(P);
+    MatmulDefinition definition{
+        std::vector<MatrixView>(P), std::vector<MatrixView>(P), std::vector<MatrixView>(P), {q, q, q}};
+    auto allocate_matrix = [&](std::size_t node, std::size_t rows, std::size_t cols) {
+        return plan.matrix_view(plan.allocate_buffer(node, rows * cols), rows, cols);
+    };
+    for (std::size_t node = 0; node < P; ++node) {
+        A[node] = allocate_matrix(node, block, block);
+        B[node] = allocate_matrix(node, block, block);
+        C[node] = allocate_matrix(node, block, block);
+        definition.input_a_rows[node] = plan.matrix_view(A[node].buffer, height, N);
+        definition.input_b_rows[node] = plan.matrix_view(B[node].buffer, height, N);
+        definition.output_c_rows[node] = plan.matrix_view(C[node].buffer, height, N);
+        if (P > 1)
+            scratch[node] = allocate_matrix(node, height, block);
+    }
+    if (P > 1) {
+        add_rows_to_tiles(plan, config, definition.input_a_rows, A, scratch);
+        add_rows_to_tiles(plan, config, definition.input_b_rows, B, scratch);
+    }
+    auto node_at = [q](std::size_t row, std::size_t col) { return (row % q) * q + col % q; };
+    auto skew = plan.add_superstep(Phase::Skew);
+    for (std::size_t node = 0; node < P; ++node) {
+        const auto i = node / q, j = node % q;
+        skew.add_zero(C[node]);
+        if (i)
+            skew.add_send(node_at(i, j + q - i), PayloadPart{A[node], {i * block, j * block}});
+        if (j)
+            skew.add_send(node_at(i + q - j, j), PayloadPart{B[node], {i * block, j * block}});
+    }
+    for (std::size_t round = 0; round < q; ++round) {
+        auto step = plan.add_superstep(Phase::Multiply);
+        for (std::size_t node = 0; node < P; ++node) {
+            const auto i = node / q, j = node % q, k = (i + j + round) % q;
+            const auto source_a = node_at(i, j + (round == 0 ? i : 1));
+            const auto source_b = node_at(i + (round == 0 ? j : 1), j);
+            if (source_a != node)
+                step.add_receive(source_a, A[node]);
+            if (source_b != node)
+                step.add_receive(source_b, B[node]);
+            step.add_gemm(A[node], B[node], C[node], {i, k, j});
+            if (round + 1 < q) {
+                step.add_send(node_at(i, j + q - 1), PayloadPart{A[node], {i * block, k * block}});
+                step.add_send(node_at(i + q - 1, j), PayloadPart{B[node], {k * block, j * block}});
+            }
+        }
+    }
+    if (P > 1)
+        add_tiles_to_rows(plan, config, C, definition.output_c_rows, scratch);
+    return definition;
 }
-if (P > 1) {
-    rows_to_blocks(plan, n, 1, left, left, 0, scratch);
-    rows_to_blocks(plan, n, 1, right, right, 1, scratch);
-}
+} // namespace dmm
 ```
 
-It next declares skew sends, then q multiply steps. Each step receives pending
-messages before the GEMM and sends next-round operands afterwards:
+The schedule reads in order: convert A/B, initialize C and skew, receive/GEMM/
+shift for each round, convert C back, return the bindings. Source formulas remove
+incoming-message tables. `add_gemm` infers dimensions and records work/coverage.
+`PayloadPart{view,{row,col}}` annotates the actual global rectangle; matching uses
+only the sending step and endpoints. All operations on each node follow copies,
+GEMMs, sends. Never append operations to an older superstep.
 
-```cpp
-plan.multiply_add(step, node,
-                  {i, k, j, block, block, block},
-                  {left[node], 0, block},
-                  {right[node], 0, block},
-                  {result[node], 0, block});
-```
+There is one message per ordered node pair per step. For several components use
+`step.add_send(destination, {{a, origin_a}, {b, origin_b}})` and next-step
+`step.add_receive(source, {local_a, local_b})`. Components are copied and matched
+positionally. Shapes/arity are checked; equal-shaped swapped operands remain the
+author's responsibility. No tag or message handle is needed. See the full
+[DSL contract](api/cpp.md#bsp-operation-plan).
 
-Here k=(i+j+round)%q. `multiply_add` executes the common blocked GEMM and records
-work/coverage; do not manually count the same work. Omit final-round shifts.
-Finish with `blocks_to_rows` and `layout.coverage={q,q,q}`. The full source
-contains message routing and C zeroing; do not add host reset/gather code here.
-
-The builder runs once during construction. It never calls `execute`, `seal`,
-starts a thread pool, performs actual GEMMs, or synthesizes a trace.
+The builder never calls `execute` or `finalize`, starts a pool, runs a GEMM or
+synthesizes a trace. Ordinary and retained calls execute these same operations.
 
 ## 3. Ordinary and retained calls
 
@@ -111,14 +160,14 @@ def prepare(A, B, *, P=16, c=1):
 ```
 
 Likewise expose forwarding `validate_size`, `matmul` and `matmul_traced` for the
-existing runners. Register the C++ builder in the shared binding switch; do not
+existing runners. Register the C++ builder in `src/algorithms/registry.cpp`; do not
 copy NumPy conversion, GIL handling or prepared-class registration. Inputs are
 finite matching FP32 square matrices; strided/read-only inputs are preserved.
 Prepared output is writable contiguous FP32 of original shape.
 
 ## 4. Ring builder
 
-Implement `void build_ring(BspPlan&,MatmulLayout&)`. Require positive P and c=1;
+Implement `MatmulDefinition build_ring(BspPlan&, const MatmulConfig&)`. Require positive P and c=1;
 P need not be square. Let h=n/P. Bind A/C h×n rows and a circulating B h×n row
 block per node. For a ring sending to (r+1)%P, round t uses k=(r−t+P)%P:
 
@@ -126,7 +175,8 @@ $$
 C_r \mathrel{+}= A_r[:,kh:(k+1)h] B_k.
 $$
 
-Record `ProductRegion{r,k,0,h,n,h}` and coverage `{P,P,1}`. B's message region is
+Call `add_gemm(A_rows[r].submatrix(0,k*h,h,h), B[r], C[r], {r,k,0})`
+and return `product_grid={P,P,1}`. B's message region is
 `{k*h,0,h,n}`. Run P rounds, omitting the last send. Native layout is already
 common rows, so no row/block conversion is needed. With one step per round,
 expect F_total=2n³, W_crit=2n³/P, P(P−1) messages, C_total=(P−1)n²,
@@ -135,16 +185,21 @@ Test P=1/2/3 and proposal P=16/64/256, including P>H.
 
 ## 5. 2.5D builder
 
-Implement `void build_two_point_five_d(BspPlan&,MatmulLayout&)`. Validate with
+Implement `MatmulDefinition build_two_point_five_d(BspPlan&, const MatmulConfig&)`. Validate with
 `grid_size(P,c)`: P=c*q² and c divides q. Use id(z,i,j)=z*q²+i*q+j so the first
 q² IDs form the base layer. Use shared conversions, tree broadcasts of A/B over
 ordered groups `[id(0,i,j),...,id(c−1,i,j)]`, then layer GEMMs, tree sum of C to
-z=0 and shared conversion back to common rows. Preallocate all participants.
+z=0 and shared conversion back to common rows. Preallocate all participants. The base layer uses shared row/tile conversions;
+other tile entries may be empty until replication. Build `NodePayloads` with
+A then B components and broadcast them together, so each tree edge sends one
+message. Reduce C through `add_tree_reduce_sum`. At c=1 singleton collectives
+append no steps; retain the same builder and lifecycle.
 
 One valid layered Cannon schedule takes R=q/c rounds per layer. Initially shift
 A left by i+zR and B up by j+zR, modulo q. In round t use
 k=(i+j+zR+t)%q; between rounds shift A left and B up by one. Use block side b=n/q,
-`ProductRegion{i,k,j,b,b,b}`, and coverage `{q,q,q}`. Across layers/rounds each
+`add_gemm(A[node],B[node],C[node],{i,k,j})`, and return
+`product_grid={q,q,q}`. Across layers/rounds each
 (i,k,j) must occur exactly once. Do not run a full Cannon on every layer.
 
 Test P=64/c=4 (R=1), P=256/c=4 (R=2), and c=1 degeneration. Verify 2n³ GEMM
@@ -229,8 +284,8 @@ These paths share code, so agreement alone is not a correctness oracle.
 
 Common lifecycle/NumPy boundary tests belong to the shared suite. A new builder
 must additionally pass first/repeated no-allocation and failure/retry checks.
-Extend the existing allocation hook in `tests/cpp/test_prepared.cpp`; do not
-define another global `operator new`. Keep ownership, invalid-view, duplicate
+Use `allocation_test::Watch` from `tests/cpp/allocation_watch.hpp`; the one global
+allocation hook is in `test_allocations.cpp`. Do not define another `operator new`. Keep ownership, invalid-view, duplicate
 message and unconsumed-message validation. Do not weaken the kernel or statistics.
 
 ```sh
