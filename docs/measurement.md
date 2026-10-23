@@ -17,7 +17,8 @@ group, sizes, warmups and repeats. Defaults are five warmups and fifteen repeats
 Algorithms expose `prepare(A,B,*,P,c)` and a prepared object with
 `run_into(output,executor)` and `trace()`. The C++ [prepared runtime](api/cpp.md#preallocated-execution)
 preallocates node buffers, message caches, operation lists and trace metadata.
-Cannon is the reference adapter; ring/2.5D implementations remain teammate work.
+The common `PreparedMatmul` owns this lifecycle for every layout. Cannon supplies
+only its builder; ring/2.5D builders remain teammate work.
 
 The **internal native timer** starts at common input row shards and stops at
 common output row shards. It includes zeroing C, all layout conversion/packing,

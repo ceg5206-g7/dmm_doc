@@ -2,9 +2,9 @@
 
 The Python entry points are `matmul`, `matmul_traced` and `prepare` in
 `python/dmm/algorithms/cannon.py`. `src/cannon.cpp` contains one Cannon schedule,
-built by `PreparedCannon` on the shared `PreparedBsp` runtime. Ordinary calls
-create a temporary prepared object through `PlannedAlgorithm`; `prepare` retains
-the same object for repeated execution. All arithmetic uses the shared blocked
+declared by `build_cannon(BspPlan&,MatmulLayout&)`. The shared `PreparedMatmul`
+owns input/output and execution lifecycle. Ordinary calls create a temporary
+workspace; `prepare` retains the same object for repeated execution. All arithmetic uses the shared blocked
 `gemm_add` kernel (tile 32).
 
 ## Cannon's logical block grid
@@ -26,7 +26,7 @@ After multiplication, C blocks convert back to the same row distribution; the
 host output adapter gathers and crops only after the common row-shard result
 exists. Host array copies are outside logical-node communication counts, while
 the current convenience matmul timing includes those copies and allocation.
-The prepared adapter is implemented as `PreparedCannon`; its internal timer
+The common workspace is `PreparedMatmul`; its internal timer
 measures common rows to common rows after preallocation. See the
 [contribution walkthrough](../contribute.md) and
 [measurement protocol](../measurement.md) for setup and timing boundaries.
@@ -74,11 +74,8 @@ retained common-input calls now have identical full traces and payload peaks.
 Cached allocated storage is counted even while idle. Historical allocation-based
 Cannon traces can have different peaks and should keep their recorded revision.
 
-`matmul_traced(..., native_layout=True)` and C++ `Cannon::run_native` provide an
-explicit native-input adapter for schedule tests. They do not pad and require
-n divisible by q. They load native blocks before the body and assemble a host
-output afterwards; they are not the common-input end-to-end metric. When comparing
-with a padded common execution, supply the same padded input size.
+Native metrics are filtered from the same common execution. There is no separate
+native-input adapter; schedule tests inspect the corresponding phases directly.
 
 ## Input and output contract
 
@@ -92,5 +89,5 @@ with a padded common execution, supply the same padded input size.
 Node storage uses move-only tracked buffers and explicit message operations.
 The compatibility algorithm object carries P/c without mutable execution state;
 its prepared workspace owns the buffers. Executed block triples and actual GEMM
-shapes are recorded by `PreparedBsp` during execution and checked by
+shapes are recorded by `BspPlan` during execution and checked by
 `validate_coverage`. The 1D/2.5D algorithms remain pending. See [framework milestones](../framework.md).

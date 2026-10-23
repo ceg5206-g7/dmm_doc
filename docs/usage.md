@@ -165,8 +165,9 @@ See the generated [Python reference](api/index.md) for dataset and runner APIs.
 
 Traces expose `original_size`, `padded_size`, and message `region` rectangles.
 `count_native(trace)` reports the same execution excluding only input/output
-conversion. `matmul_traced(..., native_layout=True)` is an explicit unpadded
-native-input test adapter; its size must be divisible by sqrt(P).
+conversion. Native metrics come from this same padded execution; there is no
+separate native-input adapter. The common `dmm.matmul.prepare` also accepts an
+explicit layout, P and c and returns the shared workspace.
 
 Timing summaries expose median_time_s and iqr_time_s, with linearly interpolated
 sample quartiles. Repetitions are summarized separately per input group; multiple

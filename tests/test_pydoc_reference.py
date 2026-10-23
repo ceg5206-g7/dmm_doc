@@ -36,7 +36,7 @@ def test_pydoc_reference_covers_modules_and_public_api():
     references = json.loads(result.stdout)
     for module in ("dmm", "dmm.config", "dmm.datasets", "dmm.execution",
                    "dmm.benchmark", "dmm.analysis", "dmm.cli",
-                   "dmm.algorithms", "dmm.algorithms.cannon", "dmm.bsp", "dmm._native"):
+                   "dmm.algorithms", "dmm.algorithms.cannon", "dmm.matmul", "dmm.bsp", "dmm._native"):
         assert f"{module}.html" in references
     pages = {name: Page(html) for name, html in references.items() if name.endswith(".html")}
     cannon = pages["dmm.algorithms.cannon.html"]
@@ -45,6 +45,8 @@ def test_pydoc_reference_covers_modules_and_public_api():
     assert "-matmul_traced" in cannon.anchors
     for name in ("Trace", "SuperstepRecord", "MessageRecord", "Counts", "-count", "-bsp_cost"):
         assert name in pages["dmm._native.html"].anchors, name
+    assert "PreparedMatmul" in pages["dmm._native.html"].anchors
+    assert "-prepare" in pages["dmm.matmul.html"].anchors
     assert "ThreadExecutor" in pages["dmm._native.html"].anchors
     assert "SerialExecutor" in pages["dmm._native.html"].anchors
     assert "Executor" in pages["dmm._native.html"].anchors

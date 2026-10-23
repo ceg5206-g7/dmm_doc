@@ -1,5 +1,32 @@
 # Framework verification record
 
+## Unified operation-plan runtime (2026-10-23)
+
+The simplification based on main revision `c5ca662` removes the callback BSP
+runtime and per-layout prepared classes. `build_cannon` declares operations;
+`PreparedMatmul` owns the common lifecycle and `BspPlan` is the sole interpreter.
+Validation was performed on the working tree before committing these changes.
+
+- Debug and Release: **71 C++ tests passed in each build**.
+- Python and documentation: **480 tests passed**; strict MkDocs build passed.
+- Ownership, message validation, many-to-one traffic, memory peaks, trees and
+  conversions now test the plan interpreter directly against independent counts.
+- A separate one-node builder exercises the common lifecycle without Cannon.
+- First/repeated no-allocation, input ownership, ordinary/prepared full-trace
+  equality, shared-workspace concurrency and failure/retry checks passed.
+- Actual CLI smoke: Cannon P=4/16 at original n=17/65, serial, seed 5206, group 0,
+  FP32 range [-1,1]. Dataset generation, model capture, independent calibration,
+  five warmups/fifteen repetitions and measurement-trace model replay passed.
+  Four measured configurations produced 420 phase/end-to-end sample rows.
+
+Smoke artifacts are local temporary files under
+`/var/folders/lw/j9_lmxtd6gx45dln0mlczmn80000gn/T/dmm-plan-smoke-jvrydv8f/`.
+They check functional integration, not performance rankings. The current
+[contribution guide](contribute.md) provides the builder contract and reproducible
+smoke profiles. Ring/2.5D and the full 24-configuration comparison remain pending.
+
+## Historical framework run
+
 Runtime source: `270300d9bc621ed977460ba5dc948c0debfd2f16`; captured with a clean working tree.
 The later verification commit changes documentation and candidate labels/provenance in figures only.
 

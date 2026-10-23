@@ -1,442 +1,182 @@
 # C++ API
 
-Headers live in `include/dmm/`. This page describes the native interface;
-the [Python reference](index.md) is generated separately with pydoc.
+## Matrix and executor
 
-## Matrices and block views
+`algorithm.hpp` provides owning `Matrix<T>{size,values}`, checked read-only
+`MatrixBlockView<T>` and the compatibility `Algorithm` concept. Matrices must be
+nonempty square storage; size arithmetic is checked. The experiment uses FP32
+inputs and an independent FP64 reference.
 
-```cpp
-template <typename T>
-struct Matrix {
-    explicit Matrix(std::size_t size);
-    std::size_t size;
-    std::vector<T> values;
-    MatrixBlockView<T> block(std::size_t row, std::size_t col,
-                            std::size_t block_size) const;
-};
+`execution.hpp` provides synchronous `Executor::for_each(count,task)`,
+`SerialExecutor`, `ThreadExecutor(workers)` and `make_executor(workers)` (zero
+selects serial). Logical P is independent of the thread count. See
+[executor lifecycle](../design.md#executors).
 
-template <typename T>
-struct MatrixBlockView {
-    const T* data;
-    std::size_t size;
-    std::size_t stride;
-    const T& operator()(std::size_t row, std::size_t col) const noexcept;
-};
-```
+## Algorithm builder
 
-Matrices own zero-initialized row-major square storage. Construction rejects
-zero dimensions and size arithmetic overflow using `sizeof(T)`. `block` rejects
-malformed storage and empty/out-of-bounds blocks. Views are read-only, trivially
-copyable borrowers; keep the source alive and its storage stable.
-
-Cannon uses `Matrix<float>` at its host adapters and tracked node buffers
-inside its common-shard and native schedules. Independent native test references use `Matrix<double>`.
-Template definitions are in `algorithm.hpp`.
-
-## Shared blocked GEMM
-
-`include/dmm/gemm.hpp` provides `GEMM_TILE = 32` and:
+`matmul.hpp` defines the entire algorithm extension contract:
 
 ```cpp
-void gemm_add(std::size_t m, std::size_t n, std::size_t k,
-              std::span<const float> a, std::size_t lda,
-              std::span<const float> b, std::size_t ldb,
-              std::span<float> c, std::size_t ldc);
-```
-
-This computes `C += A*B` for row-major FP32 rectangles with row strides in
-words. It allocates nothing, supports tile tails, preserves input and padding
-words, and visits k in ascending order per output element. Nonzero C is allowed;
-C must not overlap A/B. Storage lengths and strides are checked before writing,
-including integer overflow. All layouts must use this kernel and frozen tile.
-Tests compare strided rectangles against an independent FP64 oracle.
-
-## BSP runtime
-
-`include/dmm/bsp.hpp` declares an algorithm-independent runtime of logical nodes
-with private mailboxes. Communication is copied and counted, never delayed.
-
-```cpp
-class Node {
-public:
-    std::size_t id() const noexcept;
-    std::size_t nodes() const noexcept;
-    void send(std::size_t destination, std::size_t tag,
-              std::span<const float> payload, std::optional<ElementRegion> region = std::nullopt);
-    Buffer receive(std::size_t source, std::size_t tag,
-                               std::size_t words);
-    Buffer buffer(std::size_t words = 0) const;
-    void compute(std::size_t flops) noexcept;
-};
-
-class Bsp {
-public:
-    explicit Bsp(std::size_t nodes);
-    std::size_t nodes() const noexcept;
-    Buffer buffer(std::size_t node, std::size_t words = 0) const;
-    NodeBuffers buffers(std::size_t words = 0) const;
-    std::size_t live_words(std::size_t node) const;
-    void superstep(std::string label, Executor& executor,
-                   const std::function<void(Node&)>& body);
-    Trace finish();
-};
-```
-
-`Bsp(nodes)` rejects zero nodes with `std::invalid_argument`. `superstep` runs
-`body` once per node as one `Executor::for_each` batch, checks that every
-message delivered by the previous superstep was received, records the
-superstep and then delivers its messages. `finish` performs the same check for
-the last superstep, returns the trace and starts an empty one.
-
-A `Node` is the handle for one node during one superstep; only that node's task
-uses it, and it cannot be constructed outside `Bsp`.
-
-- `send` copies `payload` into a message delivered for the next superstep.
-  A destination outside the machine throws `std::out_of_range`; sending to
-  itself throws `std::invalid_argument`; a second message with the same
-  destination and tag in one superstep throws `std::logic_error`.
-- `receive` moves out the message from `(source, tag)` delivered at the end of
-  the previous superstep. An invalid source throws `std::out_of_range`; a
-  missing message or a length other than `words` throws `std::logic_error`.
-- `compute` adds local FLOPs; a multiply-add counts as two.
-
-An unreceived delivered message makes the next `superstep` or `finish` throw
-`std::logic_error`.
-
-## Traces, counts and cost
-
-```cpp
-struct MessageRecord {
-    std::size_t source, destination, tag, words;
-    std::optional<ElementRegion> region;
-};
-
-struct SuperstepRecord {
-    std::string label;
-    std::vector<std::size_t> flops;      // Indexed by logical node.
-    std::vector<MessageRecord> messages;
-    std::vector<std::size_t> peak_words; // Per-node peak for this step.
-    std::vector<ProductRecord> products;
-};
-
-struct Trace {
-    std::size_t nodes = 0;
-    std::vector<SuperstepRecord> supersteps;
-    std::vector<std::size_t> peak_words; // Per-node peak for this trace.
-    std::size_t original_size = 0, padded_size = 0;
+struct MatmulLayout {
+    const std::size_t n, P, c; // n is the common padded size
+    std::vector<std::size_t> a, b, result;
     CoverageGrid coverage;
 };
+using PlanBuilder = void (*)(BspPlan&, MatmulLayout&);
 
-struct Counts {
-    std::size_t supersteps = 0;
-    std::size_t total_flops = 0, critical_flops = 0;
-    std::size_t total_words = 0, critical_words = 0;
-    std::size_t messages = 0;
-    std::size_t peak_words = 0;
-    Counts& operator+=(const Counts& other) noexcept;
-    friend bool operator==(const Counts&, const Counts&) = default;
-};
-
-Counts count(const SuperstepRecord& superstep);
-Counts count(const Trace& trace);
-Counts count_native(const Trace& trace);
-
-struct CostParameters {
-    double w = 1, g = 0, l = 0;
-};
-
-double bsp_cost(const Counts& counts, const CostParameters& parameters);
+void build_cannon(BspPlan& plan, MatmulLayout& layout);
 ```
 
-Payload sizes are FP32 words. Messages are recorded in the superstep that sent
-them. For a superstep, `count` sums FLOPs, words and messages, and takes
-`critical_flops` as the maximum node FLOPs and `critical_words` as the maximum
-over nodes of $h = \max(\text{sent}, \text{received})$. Counting a trace adds
-the per-superstep counts, so critical counts are sums of per-superstep maxima.
-
-`bsp_cost` returns
-`w * critical_flops + g * critical_words + l * supersteps`. Non-finite or
-negative parameters throw `std::invalid_argument`. Python exposes these records
-read-only through `dmm.bsp`, with `bsp_cost(counts, *, w=1, g=0, l=0)`.
-
-## Algorithms
-
-```cpp
-struct Traced {
-    Matrix<float> product;
-    Trace trace;
-};
-
-template <typename T>
-concept TracedAlgorithm = Algorithm<T> && requires(
-    const T& algorithm, const Matrix<float>& a, const Matrix<float>& b,
-    Executor& executor) {
-    { algorithm.run(a, b, executor) } -> std::same_as<Traced>;
-};
-
-inline constexpr std::size_t GRID = 4;
-
-struct Cannon {
-    std::size_t P = 16, c = 1;
-    Matrix<float> matmul(const Matrix<float>& a, const Matrix<float>& b,
-                         Executor& executor) const;
-    Traced run_native(const Matrix<float>& a, const Matrix<float>& b, Executor& executor) const;
-    Traced run(const Matrix<float>& a, const Matrix<float>& b,
-               Executor& executor) const;
-};
-static_assert(TracedAlgorithm<Cannon>);
-```
-
-`Algorithm<T>` is a C++20 concept requiring a const algorithm to accept two
-FP32 matrices plus an executor reference and return exactly `Matrix<float>`
-by value. `TracedAlgorithm<T>` also requires `run` to return the product and
-its BSP trace as `Traced`. Algorithms use plain structs without a virtual base.
-
-Cannon validates matching square storage, c=1 and square P=q*q. `run` uses
-common row shards, zero padding to a multiple of P and traced conversions;
-`run_native` requires dimensions divisible by q and executes only the q+1 body
-[supersteps](../algorithms/cannon.md#supersteps-and-message-routes) on `Bsp(P)`; `matmul` returns `run(...).product`.
-
-## Executors
-
-```cpp
-class Executor {
-public:
-    virtual ~Executor() = default;
-    virtual void for_each(std::size_t count,
-                         const std::function<void(std::size_t)>& task) = 0;
-};
-
-// SerialExecutor and ThreadExecutor implement Executor.
-std::unique_ptr<Executor> make_executor(std::size_t workers);
-```
-
-`count` is the number of tasks; `task(index)` performs task `index` for indices
-from zero through `count-1`. The call is synchronous and propagates task errors.
-`Bsp` submits one batch per superstep with one task per node. Cannon's single
-prepared engine submits three batches per logical step: 33 batches of 16 tasks
-for its default 11-step common route. The cost model still charges S=11.
-A zero task count does no work.
-
-`make_executor(0)` creates serial execution. Positive counts create a thread
-pool. `ThreadExecutor` starts workers at construction, provides `enter()` and
-idempotent `close()`, and closes on destruction. Calls sharing a pool serialize
-batches; closing waits for the active batch. See [lifecycle rules](../design.md#executors).
-
-## Native correctness validation
-
-```cpp
-struct Error {
-    double max_absolute;
-    double frobenius_relative;
-};
-
-Error validate(const Matrix<float>& result, const Matrix<double>& reference,
-               double atol = 1e-4, double rtol = 1e-3);
-```
-
-Validation checks dimensions and both storage lengths, finite tolerances and
-values, and elementwise absolute/relative tolerance. Malformed arguments throw
-`std::invalid_argument`; incorrect/non-finite values throw `std::runtime_error`.
-The benchmark uses its Python NumPy validator; native tests use this function.
-
-## Fixed tree collectives
-
-`include/dmm/collectives.hpp` exposes:
-
-```cpp
-using TreeGroup = std::vector<std::size_t>;
-void tree_broadcast(Bsp&, Executor&, std::span<const TreeGroup> groups,
-                    NodeBuffers& values, std::size_t tag,
-                    std::span<const ElementRegion> regions = {});
-void tree_reduce_sum(Bsp&, Executor&, std::span<const TreeGroup> groups,
-                     NodeBuffers& values, std::size_t tag,
-                    std::span<const ElementRegion> regions = {});
-```
-
-Each group is an ordered, non-empty list of distinct node ids. The first is
-root; rank r has parent (r-1)/2 and children 2r+1, 2r+2 where present. Groups
-must be disjoint and ids in range. `values` has one entry per machine node;
-a node task accesses only its own entry. Nonparticipants remain unchanged.
-Broadcast overwrites nonroot entries with copied root data. Reduction requires
-equal lengths within a group, sums children in rank order and leaves the result
-at the root (other entries are not promised to remain original partial sums).
-Validation completes before any superstep is executed.
-
-Independent groups execute in the same supersteps. Broadcast visits depth 0
-through the maximum depth; reduction visits the opposite order. Labels are
-`replication` and `reduction`. The last step consumes the final messages and is
-charged as a real superstep; singleton-only groups need zero supersteps.
-Every edge uses `send/receive`; every reduction element addition records one
-FLOP. For a four-node group with m words, each operation records 3 messages,
-3m total words, 3m critical words and 3 supersteps. Reduction adds 3m total and
-critical FLOPs. Counts describe this exact heap-tree schedule, not a substituted
-idealized logarithmic formula. Callers choose tags; both collectives drain their
-mailboxes before returning.
-
-## Node payload ownership and peak memory
-
-`memory.hpp` defines move-only `Buffer` and `NodeBuffers = std::vector<Buffer>`.
-Create them with `Bsp::buffer(node, words)`, `Bsp::buffers(words)` (one per node),
-or `Node::buffer(words)` inside a node task. Buffers expose size/data/begin/end,
-indexing, `assign(count, value)`, `assign(span)` and `clear()`. They work as spans
-with `send` and `gemm_add`. Copying a Buffer is disabled; send makes an explicit
-counted copy. `receive` transfers a Buffer without copying. The ledger stays
-alive if a buffer outlives the machine.
-
-Counts track allocated FP32 payload slots, including vector capacity, with no
-container/trace metadata. Same-size assign reuses storage; size-changing assign
-counts the simultaneous old and new allocations before releasing the old one.
-`clear` frees payload storage. Message delivery transfers accounting from the
-sender's outbox to the receiver's inbox; receiving/moving into local storage
-never registers a second allocation. Delivery order is the fixed source-id
-order in BSP and independent of physical worker count.
-
-`live_words(node)` reports current payload storage. Each superstep snapshots its
-own per-node peak, and `finish` returns the lifetime per-node peaks, then starts
-a new peak interval with live buffers as its baseline. `Counts.peak_words` is
-the maximum node peak; combining counts takes max for memory, sums for work and
-communication. Do not add individual buffer peaks or node peaks.
-
-Cannon and tree collectives use these buffers. The current host-side Matrix
-inputs/output and FP64 oracle are whole-program storage outside node payload
-budgets. Future common row shards, conversions, packing and replicas must use
-this same buffer API, so their simultaneously live payload is included. The
-whole process resident memory and DRAM traffic are separate metrics.
-
-## Common shards and conversion
-
-`sharding.hpp` provides `RowShards{original_size, size, NodeBuffers values}` and
-`BlockShards{original_size, size, c, NodeBuffers values}`. Construct row inputs
-with `make_row_shards(machine, matrix)` and gather/crop with
-`gather_row_shards(rows)`. `padded_size(n,P)` checks overflow and FP32 storage
-size before allocation. Common n is padded to a multiple of P.
-
-`rows_to_blocks(machine, executor, rows, c, tag)` converts to base-layer blocks;
-`blocks_to_rows(machine, executor, blocks, tag)` converts the base C layer back.
-For 2.5D the first q*q nodes hold base blocks and other layers start empty.
-Both use two supersteps per conversion, or zero for P=1. Messages carry
-`ElementRegion{row,col,rows,cols}`; its rectangle must match payload size and
-must not overflow. Buffer dimensions and ownership are checked before execution,
-including rejecting buffers from another machine. Round-trip tests cover P=1,
-16,64,256, c=1 and the two valid c=4 proposal configurations.
-
-`count_native(trace)` excludes exactly input_conversion/output_conversion labels
-and takes memory peaks from those retained steps. `count(trace)` includes all
-stages. Each node records packing and local output storage in the same memory
-ledger as computation. Host scatter/gather adapters do not masquerade as logical
-communication; the actual row/block redistribution is always explicit messages.
-
-## Executed multiplication coverage
-
-`Node::multiply_add(product, A, lda, B, ldb, C, ldc)` calls the shared blocked
-GEMM, then records its successful execution and FLOPs together. The product is
-`ProductRegion{i,k,j,m,n,inner}`: uniform block indices and actual GEMM dimensions.
-Failed bounds checks do not create records or charge work. Each superstep's
-`products` contains `ProductRecord{node,product}`; these metadata are excluded
-from payload memory accounting.
-
-`Trace.coverage = CoverageGrid{row_parts,inner_parts,col_parts}` defines the
-uniform partition of padded_size. Cannon uses q,q,q; a row ring uses P,P,1;
-2.5D uses q,q,q across all layers. The shared `validate_coverage(trace)` in
-`coverage.hpp` independently checks node ids, indices, actual GEMM shapes,
-per-node recorded FLOPs and exactly one execution of every (i,k,j) triple.
-It never expands n³ scalar terms; storage scales with the number of block
-triples. Invalid partition metadata throws invalid_argument; missing, repeated
-or inconsistent executed blocks throw runtime_error.
-
-Python exposes readonly records and `dmm.bsp.validate_coverage(trace)`. Use it
-alongside the independent FP64 oracle and message checks. Tests deliberately
-remove, duplicate and alter executed records to verify the validator fails.
-The model pipeline must invoke this validation before persisting trusted counts.
-
-Tree collectives accept optional one-per-group element regions. If supplied,
-all tree edges preserve that matrix rectangle; payload length and overflow are
-checked before any superstep. Matrix model captures require a region for each
-nonempty payload, so 2.5D replication/reduction should pass these regions.
+The builder allocates node-owned buffers and binds one ID per node in each of
+`a`, `b` and `result`. Each needs capacity at least n²/P words. Inputs and result
+must be distinct. Larger capacity permits row/tile reuse with shared conversion
+scratch. The builder declares C zeroing and all communication/arithmetic phases,
+then sets the coverage grid. It neither executes nor seals the plan. Missing,
+foreign, undersized or aliased common row bindings are rejected by the workspace.
 
 ## Preallocated execution
 
-`include/dmm/prepared.hpp` provides `PreparedBsp`. Allocate node-owned buffers,
-add phase-labelled steps, then declare local copies, zero fills, sends, matching
-next-step receives and `multiply_add` operations. `receive(..., add=true)` fuses
-an FP32 sum into the received copy for reductions. Its arithmetic is counted;
-its elapsed time belongs to the copy bucket. Local views must belong to the
-specified node; GEMM output cannot alias its inputs. In-place layout conversion
-requires explicit, counted scratch storage.
-
-`seal(n_original,n_padded,CoverageGrid)` validates messages and allocates the
-schedule, trace slots and reusable message storage. Every sent message must have
-exactly one receive in the immediately following step. A sealed plan cannot be
-changed. `execute(executor)` executes the real copies and shared GEMM, updates
-preallocated trace records and returns total/per-phase timings without allocation.
-The C++ regression test counts global allocations on caller and worker threads,
-including the first execution, for serial and P>H execution.
-
-Each logical step uses three blocking executor batches: local/received copies,
-GEMMs, outgoing copies. The barrier before outgoing copies makes message-slot
-reuse safe. Each sender reuses slots by size and within-step ordinal; delivery
-transfers counted ownership to the destination, and receive returns the cached
-storage to the sender. Cached allocated payload remains counted even when idle.
-Generic plans require caller serialization of reset/access/execution.
-
-`PreparedCannon` is the reference adapter. It reuses common row/tile storage and
-an explicit small packing scratch, locks reset/execute/gather, and exposes
-`run_into(output,executor)` plus an executed trace snapshot. Python
-`cannon.prepare(A,B,P=...,c=...)` owns copies of the inputs. Its writable,
-C-contiguous float32 output must be allocated before `run_into`.
-
-The internal timer starts at common row shards and ends at common row shards.
-It includes zeroing C, layout conversion, packing, message copies, GEMM and
-scheduling. Allocation, host input reset/distribution, host output assembly,
-Python/GIL work and validation are outside it. Per-batch maximum node task time
-is classified as compute/copy; the rest of wall time is scheduling/synchronization.
-For P>H that remainder also includes batching of logical-node tasks. This is a
-wall-time decomposition, not a count of memory traffic or a network measurement.
-Ordinary Cannon calls now construct a temporary `PreparedCannon` and run this
-same engine. Identical common-input calls have identical complete traces and
-payload peaks. An explicit native-input test adapter skips conversions and can
-have different peaks; older allocation-based traces also keep their original
-peaks. Use the actual captured trace for budgets and predictions.
-
-`run_once(prepared,executor)` allocates a host output, executes a prepared object
-once and returns `Traced{product,trace}`. `PlannedAlgorithm<Prepared>` provides
-P/c and the `Algorithm`/`TracedAlgorithm` methods by constructing that object.
-A prepared implementation needs a constructor `(a,b,P,c)`, `size()`,
-`run_into(span<float>,Executor&)` returning `RunTimings`, and `trace()` returning
-an executed `Trace` snapshot. `size()` is the original matrix side length;
-`run_into` writes exactly size()² words after cropping. For example:
-
 ```cpp
-using PlannedCannon = PlannedAlgorithm<PreparedCannon>;
-static_assert(TracedAlgorithm<PlannedCannon>);
+class PreparedMatmul {
+public:
+    PreparedMatmul(Matrix<float> a, Matrix<float> b,
+                   std::size_t P, std::size_t c, PlanBuilder build);
+    std::size_t size() const noexcept; // original size
+    RunTimings run_into(std::span<float> output, Executor& executor);
+    Trace trace() const;
+    Traced run(Executor& executor); // allocate host output and return product/trace
+};
 ```
 
-New ring/2.5D implementations can use this alias pattern: no ordinary BSP
-schedule is required. The existing `Cannon` type remains as a compatibility
-facade; its optional native-input adapter also uses the same plan builder.
+The common workspace owns input copies, computes `padded_size(original,P)`,
+invokes the builder and seals the result. `run_into` serializes host reset,
+execution and cropped output gathering. Output needs exactly original_n² words.
+Only the common-row-to-common-row execution is internally timed. First and
+repeated execution allocate nothing; copying the trace is outside the timer.
+`trace` throws before the first success or after a failed execution. A subsequent
+successful run recovers the workspace. `run` keeps output execution and snapshot
+under the same workspace lock.
 
-A failed prepared executor batch invalidates the trace snapshot. A later run can
-use another executor: cached-message ownership is restored before peak reset and
-timing, so both results and memory peaks recover. A regression test interrupts a
-run immediately after delivery and compares recovery with a fresh workspace.
+```cpp
+dmm::PreparedMatmul job(a, b, 16, 1, dmm::build_cannon);
+std::vector<float> output(a.values.size());
+job.run_into(output, executor);
+auto trace = job.trace();
+```
 
-The same `tree_broadcast`/`tree_reduce_sum` names also accept `PreparedBsp`,
-groups, a span of preallocated buffer ids, tag and one element region per group.
-They share topology validation with the ordinary BSP helpers and append the same
-fixed binary-tree level schedule, including uneven/disjoint groups. Every group
-participant must already have a matching buffer. Singleton groups append no steps.
-Teammates can use these overloads for prepared replication/reduction without
-rewriting collective schedules. Regression tests compare outputs/FLOPs/messages/
-supersteps against the runtime helpers and assert zero execution allocations.
+The C++ `Cannon{P,c}` compatibility facade offers `run` and `matmul` by creating
+this workspace temporarily. There is no per-algorithm prepared class, generic
+algorithm facade template, callback BSP runtime or standalone native-input mode.
 
-`rows_to_blocks`/`blocks_to_rows` also accept a prepared plan, padded n, c,
-row/block buffer-id spans, tag and optional scratch ids. They provide the same
-common two-step conversions, element regions and base-layer mapping for c=1/4.
-Every node owns an n²/P-word row buffer; the first q² nodes need n²/q²-word block
-buffers. Buffers may be shared between rows and blocks when capacity permits;
-retaining an aliased self rectangle requires n²/(P*q) words of separate scratch.
-P=1 aliases the identical row/native storage and appends no steps. Cannon uses
-these shared overloads. Tests cover prepared P=64/256,c=4 conversions independently
-of any 2.5D multiplication, compare runtime communication counts and check both
-padded tiles and restored row shards without execution allocations.
+## BSP operation plan
+
+`bsp_plan.hpp` defines `BspPlan`. Buffer IDs refer to owned storage and
+`BufferView{buffer,offset,stride}` describes rectangular local operands.
+
+```cpp
+BspPlan(std::size_t nodes);
+std::size_t allocate(std::size_t node, std::size_t words);
+std::span<float> buffer(std::size_t id);
+bool owns(std::size_t node, std::size_t id) const;
+std::size_t nodes() const;
+std::size_t step(const std::string& phase);
+void zero(std::size_t step, std::size_t node, std::size_t buffer);
+void copy(std::size_t step, std::size_t node, BufferView from, BufferView to,
+          std::size_t rows, std::size_t cols);
+std::size_t send(std::size_t step, std::size_t source, std::size_t destination,
+                 std::size_t tag, BufferView from, ElementRegion region);
+void receive(std::size_t step, std::size_t node, std::size_t message,
+             BufferView to, bool add = false);
+void multiply_add(std::size_t step, std::size_t node, ProductRegion product,
+                  BufferView a, BufferView b, BufferView c);
+void seal(std::size_t original_size, std::size_t padded_size, CoverageGrid grid);
+RunTimings execute(Executor& executor);
+const Trace& trace() const;
+```
+
+Allowed phases are `input_conversion`, `skew`, `replication`, `multiply`,
+`reduction`, `output_conversion`. Each step executes local/receive copies,
+kernels and sends in three blocking batches. S still counts logical steps.
+Messages need distinct source/destination and unique source/destination/tag per
+step. Receive by returned message ID in the immediately next step, once only.
+Views must fit node-owned storage; local in-place conversion uses explicit
+scratch. `seal` checks undrained messages, global matrix rectangles and FLOP
+arithmetic and preallocates cached message slots. A sealed plan cannot be changed.
+`multiply_add` uses the common tile-32 kernel and records its actual FLOPs and
+`ProductRegion{i,k,j,m,n,inner}`. `receive(add=true)` records reduction additions.
+No algorithm manually reconstructs a trace or adds GEMM work a second time.
+
+## Fixed tree collectives
+
+`collectives.hpp` provides plan-building helpers:
+
+```cpp
+using TreeGroup = std::vector<std::size_t>;
+void tree_broadcast(BspPlan&, std::span<const TreeGroup> groups,
+                    std::span<const std::size_t> buffers, std::size_t tag,
+                    std::span<const ElementRegion> regions);
+void tree_reduce_sum(BspPlan&, std::span<const TreeGroup> groups,
+                     std::span<const std::size_t> buffers, std::size_t tag,
+                     std::span<const ElementRegion> regions);
+```
+
+Groups are disjoint ordered node lists. Position zero is root and position r
+has parent (r−1)/2. Buffers cover all logical nodes and participants have equal
+payload size; regions describe one rectangle per group. Tree levels share
+supersteps across groups. Singleton trees append no operations. A four-node
+three-word tree has three messages, nine total/critical words and three logical
+steps per collective; reduce adds nine FLOPs.
+
+## Common row and block conversion
+
+`sharding.hpp` provides `padded_size(original,P)` and two plan-building helpers:
+
+```cpp
+void rows_to_blocks(BspPlan&, std::size_t n, std::size_t c,
+                    std::span<const std::size_t> rows,
+                    std::span<const std::size_t> blocks,
+                    std::size_t tag, std::span<const std::size_t> scratch = {});
+void blocks_to_rows(BspPlan&, std::size_t n, std::size_t c,
+                    std::span<const std::size_t> blocks,
+                    std::span<const std::size_t> rows,
+                    std::size_t tag, std::span<const std::size_t> scratch = {});
+```
+
+Use n=ceil(original/P)*P. `grid_size(P,c)` requires P=c*q² and c divides q.
+The base layer is the first q² IDs. Row buffers hold n²/P words; base tiles
+hold n²/q². Aliased conversions need separate owned n²/(P*q)-word scratch per
+node. P=1 uses the same row/block buffer and adds no conversion steps; otherwise
+each direction has two steps. Only explicit messages cross nodes. No algorithm
+implements host reset or gathering; `PreparedMatmul` handles those outside timing.
+
+## Node payload ownership and peak memory
+
+`memory.hpp` implements move-only internal `Buffer` storage and node memory
+ledgers. All algorithm allocations go through `BspPlan::allocate`; only views of
+owned storage may be used by operations. Allocated FP32 capacity, including
+scratch and retained idle message slots, is counted. Message delivery transfers
+cache accounting to the receiver until receive finishes. Failure recovery
+restores the accounting before retry. Host matrices, metadata and whole-process
+RSS are outside this payload metric. Memory aggregation takes maximum, not sum.
+
+## Traces, counts and correctness
+
+`bsp.hpp` exposes `Trace`, `SuperstepRecord`, `MessageRecord`, `ProductRecord`,
+`ElementRegion`, `ProductRegion`, `CoverageGrid`, `Counts` and `Traced`.
+`count` aggregates actual work/messages; `count_native` excludes only input/output
+conversion. Critical values sum per-step maxima, with h=max(sent,received).
+`bsp_cost(counts,{w,g,l})` evaluates w*W_crit+g*C_crit+l*S.
+
+`coverage.hpp` checks the full block-triple partition exactly once. Ring uses
+{P,P,1}; Cannon/2.5D use {q,q,q}. `validate` compares FP32 results with FP64 using
+atol=1e-4, rtol=1e-3 and reports maximum absolute and Frobenius relative errors.
+The trace is an audit record, not an independent numerical oracle.
+
+## Timing and calibration
+
+`Timing{total,compute,copy,synchronization}` and `RunTimings{end_to_end,phases}`
+report the six fixed phases. Inactive phase times may be zero. The remaining
+wall time after critical local compute/copy includes scheduling/instrumentation.
+`calibration.hpp` supplies independent `microbenchmark` functions. The Python
+measurement runner freezes coefficients before held-out full-matrix runs; see
+[measurement protocol](../measurement.md).

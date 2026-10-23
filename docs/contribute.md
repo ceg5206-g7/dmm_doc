@@ -1,231 +1,158 @@
-# Contributing an algorithm: follow Cannon
+# Adding an algorithm
 
-Use the existing Cannon implementation as a worked example: start with its native
-execution plan, follow the Python binding, then run the same plan through ordinary
-calls and reusable prepared calls with the shared experiment tools. The project uses **C++20**. Computation
-belongs in C++; Python owns datasets, FP64 validation and experiment orchestration.
+An algorithm contribution is one plan-building function. It declares owned
+buffers, local operations and messages. The common `PreparedMatmul` handles
+input copies, padding, reset, cropped output, locking and timing. The same
+`BspPlan` interpreter serves ordinary and retained calls. Do not implement a
+second prepared class or a separate ordinary multiplication loop.
 
-Write the algorithm schedule once in a prepared implementation. The framework's
-`PlannedAlgorithm<Prepared>` supplies ordinary `matmul` and `run` methods by
-creating a temporary prepared object. Keeping that object supplies repeated
-`run_into` calls. Both routes execute the same schedule and produce the same
-trace, including allocated payload peaks; do not maintain a second BSP loop.
+## 1. Files and responsibilities
 
-## 1. Find the corresponding Cannon files
+Cannon is the worked example:
 
-Paths in this guide are relative to the main repository, including `doc/`.
-
-| Cannon example | Responsibility when adding an algorithm |
+| File | Responsibility |
 | --- | --- |
-| `include/dmm/cannon.hpp` | Existing Cannon compatibility facade; new algorithms can use a `PlannedAlgorithm<Prepared>` alias |
-| `src/cannon.cpp` | The sole Cannon schedule and host adapters, implemented by `PreparedCannon` |
-| `include/dmm/prepared.hpp`, `src/prepared.cpp` | Shared plan runtime, `run_once` and `PlannedAlgorithm`; put a new algorithm's prepared implementation in its own header/source |
-| `src/bindings.cpp` | Register NumPy entry points and the prepared object |
-| `python/dmm/algorithms/cannon.py` | Expose the four Python functions used by the runners |
-| `CMakeLists.txt` | Add native sources to `dmm_core` and tests to `dmm_tests` |
-| `tests/cpp/test_cannon.cpp`, `tests/cpp/test_prepared.cpp` | Check arithmetic, routes, counts, coverage and allocation-free execution |
-| `tests/python/test_pipeline.py`, `tests/python/test_bsp.py`, `tests/python/test_prepared.py` | Check the binding and repeated prepared calls |
-| `configs/`, `doc/docs/algorithms/cannon.md` | Add experiment profiles and explain the algorithm |
+| `include/dmm/cannon.hpp` | Declare `build_cannon(BspPlan&,MatmulLayout&)`; the existing `Cannon` facade is compatibility only |
+| `src/cannon.cpp` | Allocate/bind buffers and declare Cannon's schedule |
+| `include/dmm/matmul.hpp`, `src/matmul.cpp` | Shared workspace lifecycle for all layouts |
+| `include/dmm/bsp_plan.hpp`, `src/bsp_plan.cpp` | Single operation interpreter and plan validation |
+| `src/bindings.cpp` | Shared prepare/matmul/output protocol; select the layout's builder |
+| `python/dmm/matmul.py` | Common Python API |
+| `python/dmm/algorithms/cannon.py` | Thin forwarding functions for runner discovery |
 
-For ring, create `ring.hpp`, `ring.cpp` and `python/dmm/algorithms/ring.py`;
-for 2.5D use `two_point_five_d.hpp`, `two_point_five_d.cpp` and
-`python/dmm/algorithms/two_point_five_d.py`. Give each its own native/Python tests
-and algorithm documentation. The `ring` and `2.5d` names are already registered in
-`LAYOUT_MODULES` in `python/dmm/config.py`; they are still unimplemented. The CLI
-imports these modules dynamically, so adding them does not require a CLI branch.
+For ring add `include/dmm/ring.hpp`, `src/ring.cpp`, corresponding C++/Python
+tests, `python/dmm/algorithms/ring.py` and `doc/docs/algorithms/ring.md`.
+For 2.5D use `two_point_five_d` in those filenames. Coordinate CMake source/test
+registration, the small builder switch in `src/bindings.cpp`, and documentation
+navigation. Layout module names are already registered in `config.py`.
+Neither new layout needs a workspace class, new bound class or its own NumPy
+validation/output implementation.
 
-## 2. Implement one prepared class and use the ordinary facade
+## 2. Declare buffers and build the Cannon plan
 
-A prepared implementation owns its input copies, tracked buffers and sealed
-`PreparedBsp`. It needs the following interface (shown with Cannon's public type):
+The extension contract is:
 
 ```cpp
-class PreparedCannon {
-public:
-    PreparedCannon(Matrix<float> a, Matrix<float> b,
-                   std::size_t P = 16, std::size_t c = 1);
-    std::size_t size() const noexcept;
-    RunTimings run_into(std::span<float> output, Executor& executor);
-    Trace trace() const;
-};
-
-using PlannedCannon = PlannedAlgorithm<PreparedCannon>;
-static_assert(TracedAlgorithm<PlannedCannon>);
+void build_cannon(BspPlan& plan, MatmulLayout& layout);
 ```
 
-This interface excerpt omits private members. `size()` returns the original
-matrix side length, not the padded size; `run_into` writes exactly that many
-rows and columns to the caller's output. The alias is sufficient for a new
-algorithm's ordinary C++ API: use `PlannedAlgorithm<PreparedRing>` or
-`PlannedAlgorithm<PreparedTwoPointFiveD>`. The facade carries P/c, provides
-`matmul(a,b,executor)` and `run(a,b,executor)`, and borrows the supplied executor.
-No inheritance, custom ordinary loop or extra worker pool is needed.
+`layout.n` is the padded size; `layout.P` and `layout.c` are immutable case
+parameters. The builder fills three lists: `a`, `b`, `result`, one owned buffer
+ID per node, capacity at least n²/P. These buffers contain common row shards
+at the start/end of execution. Native tiles can reuse the same capacity. The
+builder also sets `layout.coverage` and declares every required C zeroing step.
+The framework seals the plan after validating these bindings.
 
-Existing `Cannon` keeps its old public type for compatibility. Its entire common
-`run` method now delegates to the same facade:
+Cannon validates P=q², c=1, then allocates one b×b A/B/C tile per node, where
+b=n/q. Its common row shards fit in the same buffers, so conversion uses
+separate h×b scratch (h=n/P). This preserves its existing payload memory count.
+
+A representative excerpt from `src/cannon.cpp` is:
 
 ```cpp
-Traced Cannon::run(const Matrix<float>& a, const Matrix<float>& b,
-                   Executor& executor) const {
-    return PlannedAlgorithm<PreparedCannon>{P, c}.run(a, b, executor);
+auto& left = layout.a;
+auto& right = layout.b;
+auto& result = layout.result;
+for (std::size_t node = 0; node < P; ++node) {
+    left.push_back(plan.allocate(node, block * block));
+    right.push_back(plan.allocate(node, block * block));
+    result.push_back(plan.allocate(node, block * block));
+    if (P > 1) scratch.push_back(plan.allocate(node, height * block));
+}
+if (P > 1) {
+    rows_to_blocks(plan, n, 1, left, left, 0, scratch);
+    rows_to_blocks(plan, n, 1, right, right, 1, scratch);
 }
 ```
 
-`PlannedAlgorithm::run` constructs the prepared object and uses the shared
-`run_once` helper to allocate a host output, call `run_into` once, and return
-`Traced{product,trace}`. `matmul` returns that product. Python `prepare` retains
-the prepared object instead. P is the logical node count and may exceed H.
-Ordinary calls still include plan construction/allocation in their outer timing;
-prepared measurement uses only the internal common-row-to-common-row timer.
-
-Cannon's optional `run_native` test adapter uses `run_once` with native block
-input/output adapters, skipping common conversions and padding. It shares the
-same skew/multiply builder. New algorithms do not need this optional entry:
-`count_native(trace)` already excludes common input/output conversion costs.
-
-## 3. Describe Cannon's schedule once
-
-Follow `PreparedCannon` in `src/cannon.cpp`:
-
-1. Validate matching finite square inputs, square P=q² and c=1. Pad common inputs
-   to `N=ceil(n/P)*P`; row ownership is N/P rows per logical node.
-2. Allocate node-owned A/B/C buffers and conversion scratch through
-   `PreparedBsp::allocate`. Ordinary and reused calls use these same buffers.
-3. Append `rows_to_blocks` operations for A and B using the shared prepared
-   conversion overloads.
-4. Append one skew step and q multiply steps. Link each send id to its receive
-   in the immediately following step, and omit outgoing shifts on the last round.
-5. Append `blocks_to_rows` for C and seal with `plan_.seal(n_original,N,{q,q,q})`.
-6. In `run_into`, reset common input rows, execute the sealed plan and gather/crop
-   C. Only `plan_.execute(executor)` defines the internal timing interval.
-
-Building the plan declares operations; executing it performs the actual copies
-and GEMMs and writes the preallocated trace records. A snapshot is available only
-after successful execution. Use these actual records with
-`validate_coverage(trace)` and the independent FP64 oracle.
-
-Cannon declares each local product in its sole round loop as follows:
+It next declares skew sends, then q multiply steps. Each step receives pending
+messages before the GEMM and sends next-round operands afterwards:
 
 ```cpp
-plan_.multiply_add(step, node, {i, k, j, block, block, block},
-                   v(left_[node]), v(right_[node]), v(result_[node]));
+plan.multiply_add(step, node,
+                  {i, k, j, block, block, block},
+                  {left[node], 0, block},
+                  {right[node], 0, block},
+                  {result[node], 0, block});
 ```
 
-Here `k=(i+j+round)%q`, and `v(id)` constructs `BufferView{id,0,block}`.
-The runtime invokes the shared tile-32 GEMM and records successful work/coverage
-together. Do not write another multiplication loop, charge the same GEMM twice
-or synthesize product records from expected loop counts. The shared tree-reduction
-helper already counts its additions.
+Here k=(i+j+round)%q. `multiply_add` executes the common blocked GEMM and records
+work/coverage; do not manually count the same work. Omit final-round shifts.
+Finish with `blocks_to_rows` and `layout.coverage={q,q,q}`. The full source
+contains message routing and C zeroing; do not add host reset/gather code here.
 
-Node payload, packing and replicas must use tracked buffers. A view belongs to
-its node; cross-node transfers use declared sends/receives. Matrix messages need
-an actual global `ElementRegion{row,col,rows,cols}` and distinct destination/tag
-pairs per sender. Payload sizes and strides use FP32 words, not bytes.
+The builder runs once during construction. It never calls `execute`, `seal`,
+starts a thread pool, performs actual GEMMs, or synthesizes a trace.
 
-For a row ring the coverage partition is `{P,P,1}` and the native layout is
-already common rows. For 2.5D it is `{q,q,q}` across all layers; use prepared
-base-layer conversions, tree broadcasts and tree reduction back to layer 0.
-Do not copy Cannon's square-grid validation into ring: ring requires positive
-P and c=1. See the [C++ API](api/cpp.md) for exact operation contracts.
+## 3. Ordinary and retained calls
 
-## 4. Register bindings and expose Python entry points
+```cpp
+dmm::PreparedMatmul job(a, b, P, c, dmm::build_cannon);
+std::vector<float> output(a.values.size());
+job.run_into(output, executor);
+auto trace = job.trace();
+job.run_into(output, executor); // same inputs, clean C, same plan
+```
 
-In `src/bindings.cpp`, follow the existing `cannon`/`cannon_traced` wrappers and
-`PreparedCannon` registration. They validate NumPy inputs and P/c, copy inputs into
-owned C++ storage, borrow the executor, release the GIL for native execution and
-return independent output. Keep these checks when adapting the wrappers:
+The constructor owns input copies. `run_into` serializes restore/execute/gather;
+C zeroing is an operation in the timed plan. Inputs and output host adapters,
+allocation and trace snapshot copying are outside internal timing. Ordinary
+`matmul` builds the same workspace temporarily. Complete traces and peak memory
+must match the retained route. Native metrics filter conversion phases from this
+same execution; there is no standalone native-input adapter to implement.
 
-- Matching, finite, nonempty square float32 inputs; preserve read-only/strided inputs.
-- Exact integer P/c, rejecting booleans and invalid grids before execution.
-- A prepared output must be writable, C-contiguous float32 with the original shape.
-- Keep buffers alive until the synchronous executor call completes; serialize
-  shared prepared-state reset/execution/gather as `PreparedCannon` does.
-
-The Python module then exposes the following contract, as Cannon does:
+Python layout modules forward to shared functions; Cannon's pattern is:
 
 ```python
-def validate_size(size: int, *, P: int, c: int) -> None: ...
-def matmul(A, B, executor, *, P: int, c: int): ...
-def matmul_traced(A, B, executor, *, P: int, c: int): ...
-def prepare(A, B, *, P: int, c: int): ...
+from dmm import matmul as shared
+
+def prepare(A, B, *, P=16, c=1):
+    return shared.prepare(A, B, layout="cannon", P=P, c=c)
 ```
 
-`validate_size` is a cheap preflight without matrices or workers. Cannon checks
-positive size, `_native.grid_size(P,c)`, c=1 and `_native.padded_size(size,P)`.
-It accepts non-divisible sizes through common padding. Direct native entry
-points still validate their inputs; preflight is not a substitute.
+Likewise expose forwarding `validate_size`, `matmul` and `matmul_traced` for the
+existing runners. Register the C++ builder in the shared binding switch; do not
+copy NumPy conversion, GIL handling or prepared-class registration. Inputs are
+finite matching FP32 square matrices; strided/read-only inputs are preserved.
+Prepared output is writable contiguous FP32 of original shape.
 
-Cannon's other three functions forward to `_native.cannon`,
-`_native.cannon_traced` and `_native.PreparedCannon`. The ordinary benchmark calls
-`matmul`; model capture calls `matmul_traced` and receives `(C,Trace)`; measurement
-calls `prepare`, then the prepared object's `run_into` and `trace`. Keep I/O,
-oracle computation, parameter fitting and report generation out of these wrappers.
+## 4. Ring builder
 
-## 5. Keep preparation outside the measured execution
+Implement `void build_ring(BspPlan&,MatmulLayout&)`. Require positive P and c=1;
+P need not be square. Let h=n/P. Bind A/C h×n rows and a circulating B h×n row
+block per node. For a ring sending to (r+1)%P, round t uses k=(r−t+P)%P:
 
-The same `PreparedCannon` in `src/cannon.cpp` serves every entry point; there is
-no second algorithm implementation to add. It declares operations once on
-`PreparedBsp`, then seals the plan. Use its public operations:
-`allocate`, `step`, `zero`, `copy`, `send`, `receive` and `multiply_add`.
-`BufferView{buffer,offset,stride}` identifies local storage; sends return message
-ids for matching next-step receives. Shared tree collectives and row/block
-conversions also have prepared overloads, including counted scratch for aliases.
+$$
+C_r \mathrel{+}= A_r[:,kh:(k+1)h] B_k.
+$$
 
-The adapter exposes `run_into(output,executor)` returning `RunTimings`, and
-`trace()` returning the last successful executed trace. Each run resets common
-input rows outside the internal timer and gathers/crops the host output after it.
-Zeroing C, packing, conversions, copies, computation and reduction remain inside
-the timed plan. Even the first execution must allocate no payload or metadata;
-allocation and a trace snapshot copy belong outside the timer. All allocated
-node payload, including retained message caches, remains counted in memory peaks.
+Record `ProductRegion{r,k,0,h,n,h}` and coverage `{P,P,1}`. B's message region is
+`{k*h,0,h,n}`. Run P rounds, omitting the last send. Native layout is already
+common rows, so no row/block conversion is needed. With one step per round,
+expect F_total=2n³, W_crit=2n³/P, P(P−1) messages, C_total=(P−1)n²,
+C_crit=(P−1)n²/P, S=P. Derive/assert these independently of runtime counting.
+Test P=1/2/3 and proposal P=16/64/256, including P>H.
 
-The fixed phase names are `input_conversion`, `skew`, `replication`, `multiply`,
-`reduction`, `output_conversion`. Return the framework's end-to-end and six-phase
-timing structure. For identical inputs/P/c, ordinary and retained calls must have
-identical outputs and full traces, including per-step/global payload peaks.
-Native-input test adapters can retain different storage from common-input plans.
-See [prepared measurement](measurement.md) for timing components.
+## 5. 2.5D builder
 
-## 6. Try the complete Cannon API
+Implement `void build_two_point_five_d(BspPlan&,MatmulLayout&)`. Validate with
+`grid_size(P,c)`: P=c*q² and c divides q. Use id(z,i,j)=z*q²+i*q+j so the first
+q² IDs form the base layer. Use shared conversions, tree broadcasts of A/B over
+ordered groups `[id(0,i,j),...,id(c−1,i,j)]`, then layer GEMMs, tree sum of C to
+z=0 and shared conversion back to common rows. Preallocate all participants.
 
-After `uv sync --locked --reinstall-package dmm`, run this Python example. It uses
-17×17 inputs and P=4, so the traced computation pads to 20×20; serial execution
-also exercises P>H. Both results are checked against an independently computed
-FP64 reference rather than against each other alone.
+One valid layered Cannon schedule takes R=q/c rounds per layer. Initially shift
+A left by i+zR and B up by j+zR, modulo q. In round t use
+k=(i+j+zR+t)%q; between rounds shift A left and B up by one. Use block side b=n/q,
+`ProductRegion{i,k,j,b,b,b}`, and coverage `{q,q,q}`. Across layers/rounds each
+(i,k,j) must occur exactly once. Do not run a full Cannon on every layer.
 
-```python
-import numpy as np
-from dmm.algorithms import cannon
-from dmm.bsp import count, validate_coverage
-from dmm.execution import SerialExecutor
+Test P=64/c=4 (R=1), P=256/c=4 (R=2), and c=1 degeneration. Verify 2n³ GEMM
+FLOPs plus (c−1)n² reduction additions, actual coverage and all replicated/cache
+memory. Public helpers count reduction additions automatically. Do not force a
+configuration through a memory budget when its recorded peak exceeds the cap.
 
-rng = np.random.default_rng(5206)
-a = rng.uniform(-1, 1, (17, 17)).astype(np.float32)
-b = rng.uniform(-1, 1, (17, 17)).astype(np.float32)
-reference = a.astype(np.float64) @ b.astype(np.float64)
-a.flags.writeable = b.flags.writeable = False
-cannon.validate_size(17, P=4, c=1)
-
-with SerialExecutor() as executor:
-    product, trace = cannon.matmul_traced(a, b, executor, P=4, c=1)
-    np.testing.assert_allclose(product, reference, atol=1e-4, rtol=1e-3)
-    validate_coverage(trace)
-    assert trace.original_size == 17 and trace.padded_size == 20
-    assert count(trace).total_flops == 2 * 20**3
-
-    prepared = cannon.prepare(a, b, P=4, c=1)
-    output = np.empty_like(a)
-    for _ in range(2):
-        output.fill(np.nan)
-        timings = prepared.run_into(output, executor)
-        np.testing.assert_allclose(output, reference, atol=1e-4, rtol=1e-3)
-        prepared_trace = prepared.trace()
-        validate_coverage(prepared_trace)
-        assert count(prepared_trace).peak_words == count(trace).peak_words
-        assert timings.end_to_end.total > 0
-```
-
-## 7. Exercise the model and measurement runners
+## 6. Model and measurement smoke profiles
 
 Create these three YAML files under `configs/`. Paths resolve relative to each
 YAML, not the shell's working directory. Use new data/output paths if these
@@ -285,51 +212,40 @@ prepared traces, median/IQR, timing components and held-out residuals. These sma
 runs check integration, not performance rankings. The [model guide](model.md) and
 [measurement guide](measurement.md) describe the output schemas and offline replay.
 
-For a new algorithm, select its layout/P/c in separate profiles before running
+For a new layout, select its layout/P/c in separate profiles before running
 the full proposal profile. Unimplemented layouts fail preflight; neither a name
 in YAML nor a cardinality test establishes that the algorithm works.
 
 <a id="verification"></a>
 
-## 8. Test and submit the contribution
+## 7. Test and submit
 
-Adapt Cannon's tests to cover FP64 correctness, zero/identity/random/cancellation
-inputs, padding/cropping (including 17,65,257), invalid configurations, input
-preservation, output ownership, read-only/strided inputs and repeated calls.
-Exercise serial and threaded executors, including P>H. Add hand-counted work and
-message-route tests and prove each executed product triple occurs exactly once.
-Compare ordinary calls with first and repeated retained calls: the complete trace,
-including regions, coverage, work, communication and memory, must match.
-For Cannon, n=16/P=16 gives S=11, F_total=8192, C_total=2496 and C_crit=164 on the
-common route; see its [count derivation](algorithms/cannon.md#hand-computed-communication-counts).
-Use your own algorithm's expected schedule, not these Cannon constants.
+Use independent FP64 oracles, zero/identity/random/signed/cancellation inputs,
+padding/cropping at 17/65/257, invalid grids and serial/threaded execution
+including P>H. Assert actual message routes, critical/total counts and exact
+block coverage. Check the complete trace (regions, products, work, phases,
+communication and peaks) agrees between ordinary and repeated prepared calls.
+These paths share code, so agreement alone is not a correctness oracle.
 
-Prepared tests must verify no allocations on caller/workers, including the first
-run, no C accumulation across runs and correct recovery after an executor error.
-Reuse/extend the allocation-counter tests in `tests/cpp/test_prepared.cpp`;
-do not define another global `operator new` in a second linked test file.
-
-Run the following from the main checkout (configure a fresh Debug directory too
-when changing native memory/message handling):
+Common lifecycle/NumPy boundary tests belong to the shared suite. A new builder
+must additionally pass first/repeated no-allocation and failure/retry checks.
+Extend the existing allocation hook in `tests/cpp/test_prepared.cpp`; do not
+define another global `operator new`. Keep ownership, invalid-view, duplicate
+message and unconsumed-message validation. Do not weaken the kernel or statistics.
 
 ```sh
 uv sync --locked --reinstall-package dmm
+uv run cmake --preset debug
+uv run cmake --build --preset debug --parallel
+uv run ctest --preset debug --no-tests=error
 uv run cmake --preset release
 uv run cmake --build --preset release --parallel
-ctest --preset release --no-tests=error
+uv run ctest --preset release --no-tests=error
 uv run --locked pytest -q tests/python doc/tests
 (cd doc && uvx --with-requirements requirements.txt mkdocs build --strict)
 ```
 
-Add an algorithm page under `doc/docs/algorithms/`, link it in `doc/mkdocs.yml`,
-and update the [status table](algorithms/overview.md) after implementation and
-verification. Record layout constraints, node numbering, schedules, counts and
-measurement limits. Commit `doc/` first, then commit the parent repository's
-updated submodule pointer along with source/tests/configs. Coordinate edits to
-`CMakeLists.txt`, bindings and navigation with other contributors. Do not weaken
-shared validation or change the shared GEMM/statistics/model to make one layout
-pass. Full comparison remains gated on actual implementations of all layouts.
-
-For diagrams, use Mermaid fences with `accTitle` and `accDescr`; use `$...$` or
-`$$` math fences as in the [Cannon page](algorithms/cannon.md). Keep architecture,
-[API contracts](api/cpp.md) and [measurement protocol](measurement.md) consistent.
+Update the algorithm page, `doc/mkdocs.yml` and status overview only after
+verification. Commit `doc/` first, then source/tests/configs and the updated
+submodule pointer in the parent repository. Both teammate algorithms must be
+implemented before running the full 24-configuration/192-scenario comparison.
