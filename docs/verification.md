@@ -1,5 +1,100 @@
 # Framework verification record
 
+## Complete Cannon pipeline (2026-10-23)
+
+Source: `bd85893db2a75a67b4504cd952e30e3546632097`, captured with a clean parent
+and documentation working tree. This run checks the current endpoint-matched
+plan runtime and formal measurement pipeline together. The host reported eight
+physical cores; the fresh Release build used Apple LLVM 21.0.0
+(`clang-2100.3.34.2`).
+
+All 18 stages returned their expected exit codes: package installation, fresh
+Release configure/build, CTest, Python/documentation tests, strict MkDocs build,
+generation, benchmark, analysis, two model captures, two formal measurements,
+two offline replays and three rejection checks.
+
+- **77 C++ tests and 507 Python/documentation tests passed**; strict MkDocs passed.
+- Dataset: seed 5206, group 0, FP32 range [0,255], original sizes
+  17/65/256/257/512/1024, with independent NumPy FP64 references.
+- FP64 validation passed for all model captures and measured repetitions at
+  `atol=1e-4`, `rtol=1e-3`; traces retain maximum absolute and Frobenius relative
+  errors and exact block coverage.
+
+### Executed configurations and reports
+
+| Stage | Configuration | Result |
+| --- | --- | --- |
+| Convenience benchmark and analysis | n=256/512/1024, P=1, c=1; serial and H=4 | 90 repeat rows, 6 median/IQR summaries |
+| Main model capture | n=256/512/1024, P=16/64/256, c=1, H=1 | 9 executions, 72 modeled scenarios, 144 budget-selection cells |
+| Padding model capture | n=17/65/257, P=16/64/256, c=1, H=1 | 9 executions, 9 modeled scenarios, 18 budget-selection cells |
+| Formal measurement | n=256/512/1024; P=1/H=1 and P=4/H=4 | 5 warmups and 15 repeats per configuration; 90 measured products, 630 phase/end-to-end sample rows |
+| Main-trace offline replay | gamma=3, lambda=700; saved P=16/64/256 traces | 9 modeled scenarios, 18 budget-selection cells |
+| Measurement-trace offline replay | gamma=10, lambda=100; saved P=4/H=4 traces | 3 modeled scenarios, 6 budget-selection cells |
+| Early rejection | measure P=16/H=4; model ring; model 2.5D | Each rejected before creating its output directory |
+
+The main scan uses gamma=1/10/100/1000, lambda=100/10000 and memory budget
+multipliers mu=8/32 (M_cap=mu*n_original²/P words); the padding scan uses
+gamma=1, lambda=100 and the same budgets. Model
+capture deliberately uses P>H for correctness and counts. Formal measurement
+uses P<=H. The convenience benchmark includes allocation and host wrappers;
+it is separate from the formal prepared measurements and their serial baseline.
+
+The 18 captured main/padding traces were checked against independent Cannon
+formulas. With padded N=ceil(n/P)*P, q=sqrt(P), b=N/q and h=N/P, both native and
+common routes have F_total=2N³ and W_crit=2N³/P. The native route has S=q+1,
+2(q−1)(q+P) messages, C_total=2(q−1)(q+P)b² and C_crit=2qb². Common input/output
+conversion adds six steps, 3P(q−1) messages, 3P(q−1)hb total words and
+3(q−1)hb critical words. The checks also validate q³ block products, saved/native
+count agreement, padding and budget decisions.
+
+Both offline replays succeeded with deliberately nonexistent matrix paths.
+All model-only rows, including replay rows, leave measured time and performance
+fields blank. Formal GFLOP/s, speedup and efficiency were independently
+recomputed from the saved medians, original n and actual H.
+
+### Formal end-to-end measurements
+
+Times are seconds. Signed residual = (measured−predicted)/measured. The threaded
+run explicitly used the completed same-input P=1/H=1 report via `--baseline`.
+Each context froze its own independent microbenchmark calibration before
+matrix measurements; no matrix-specific fit was performed.
+
+| P/H | n | Median | IQR | GFLOP/s | Speedup | Efficiency | Relative residual |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1/1 | 256 | 0.002370750 | 0.000159417 | 14.15 | 1.000 | 100.00% | −0.11% |
+| 1/1 | 512 | 0.019052667 | 0.000041167 | 14.09 | 1.000 | 100.00% | 0.35% |
+| 1/1 | 1024 | 0.168290209 | 0.000507000 | 12.76 | 1.000 | 100.00% | 9.74% |
+| 4/4 | 256 | 0.001184209 | 0.000162230 | 28.33 | 2.002 | 50.05% | 13.77% |
+| 4/4 | 512 | 0.005716000 | 0.000152082 | 46.96 | 3.333 | 83.33% | 2.86% |
+| 4/4 | 1024 | 0.041657750 | 0.000815145 | 51.55 | 4.040 | 101.00% | 0.16% |
+
+Efficiency is speedup/H and is not clamped: the 1024 result remains 101.00%.
+Cache effects and measurement variation could contribute; this run does not
+isolate their causes or establish a fixed speedup.
+
+### Evidence and scope
+
+Raw artifacts are retained locally at
+`results/cannon_pipeline_20261023__h524qgo/` (Git-ignored, not published with this
+site). `validation.json` records source/build, stage commands and exit codes,
+trace summaries, metrics and SHA-256 checksums for 119 artifacts; all 119 were
+rechecked before documenting the run. The directory contains exact YAMLs in
+`configs/`, command logs in `logs/`, benchmark CSV/analysis, model and measurement
+reports, traces and 24 figures. The layout-selection and threaded residual
+figures were visually checked.
+
+To repeat the method, use the saved YAMLs with fresh data/output paths and run
+`generate`, `bench`, `analyze`, `model`, then serial `measure` and threaded
+`measure --baseline <serial-report>`. Replay with `model --traces <trace-dir>`;
+the [model](model.md) and [measurement](measurement.md) guides give the CLI and
+output contracts. Existing reports are immutable and cannot be overwritten.
+
+This completes Cannon's pipeline verification. Selection plots explicitly name
+Cannon as the only candidate. Ring, 2.5D and the full three-layout
+24-execution/192-scenario comparison remain pending teammate integration; these
+results do not establish a winner among three layouts. Earlier records below
+retain their original revisions, datasets and timings.
+
 ## Formal measurement bounds and performance metrics (2026-10-23)
 
 Formal `measure` now enforces P<=H before dataset access or output creation.

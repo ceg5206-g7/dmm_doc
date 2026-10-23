@@ -1,10 +1,13 @@
 # Adding an algorithm
 
-An algorithm contribution is one plan-building function. It declares owned
+Algorithm logic lives in one plan-building function. It declares owned
 buffers, local operations and messages. The common `PreparedMatmul` handles
 input copies, padding, reset, cropped output, locking and timing. The same
 `BspPlan` interpreter serves ordinary and retained calls. Do not implement a
-second prepared class or a separate ordinary multiplication loop.
+second prepared class or a separate ordinary multiplication loop. Integration
+also needs registration, a thin Python module, tests and documentation, listed
+below. The [verification record](verification.md#complete-cannon-pipeline-2026-10-23)
+shows the complete pipeline already exercised with Cannon.
 
 ## 1. Files and responsibilities
 
@@ -19,13 +22,22 @@ second prepared class or a separate ordinary multiplication loop.
 | `src/bindings.cpp`, `python/dmm/matmul.py` | Common binding/NumPy protocol |
 | `python/dmm/algorithms/cannon.py` | Thin forwarding functions for runner discovery |
 
-For ring add `src/algorithms/ring.cpp`, C++/Python tests,
-`python/dmm/algorithms/ring.py` and an algorithm documentation page.
-Use `two_point_five_d` in the corresponding 2.5D filenames. Declare the builder
-in `algorithms.hpp`, register it in `src/algorithms/registry.cpp`, add the source
-and tests to CMake, and update documentation navigation. Layout module names
-are already registered in `config.py`. New layouts use the existing bindings,
-prepared class, common NumPy conversion and output validation.
+| Item to add | 1D ring | 2.5D |
+| --- | --- | --- |
+| Layout string | `ring` | `2.5d` |
+| Builder | `build_ring` | `build_two_point_five_d` |
+| C++ source | `src/algorithms/ring.cpp` | `src/algorithms/two_point_five_d.cpp` |
+| Python forwarding module | `python/dmm/algorithms/ring.py` | `python/dmm/algorithms/two_point_five_d.py` |
+| C++ tests | `tests/cpp/test_ring.cpp` | `tests/cpp/test_two_point_five_d.cpp` |
+| Algorithm page | `doc/docs/algorithms/ring.md` | `doc/docs/algorithms/two_point_five_d.md` |
+
+Declare the builder in `include/dmm/algorithms.hpp`, select it for the layout in
+`src/algorithms/registry.cpp` (replacing that layout's unimplemented rejection),
+and add the source and C++ tests to `CMakeLists.txt`. Add Python integration tests
+under `tests/python/` and update `doc/mkdocs.yml` navigation. Layout module names
+are already registered in `python/dmm/config.py`. No new switch or class is
+needed in `src/bindings.cpp`: new layouts use the existing bindings, prepared
+class, common NumPy conversion and output validation.
 
 Tests follow responsibilities: `test_plan.cpp`, `test_matmul.cpp`,
 `test_collectives.cpp`, `test_redistribution.cpp`, `test_trace.cpp`,
@@ -39,12 +51,16 @@ The only extension interface is:
 MatmulDefinition build_cannon(BspPlan& plan, const MatmulConfig& config);
 ```
 
-`config` contains immutable `padded_size`, `P` and `c`. Return one MatrixView per
+The builder receives `config` by const reference: `padded_size`, `P` and `c`.
+Write N=`config.padded_size`; the common lifecycle already chose N=ceil(n/P)*P
+from the original input size n. Return one MatrixView per
 node for `input_a_rows`, `input_b_rows` and `output_c_rows`, each N/P×N with the
 correct owner and distinct A/B/C buffers; return `product_grid={q,q,q}`. The
 workspace fills these inputs before execution and gathers the output afterwards.
-All other algorithm work is declared in the plan. Allocation happens while
-building; `add_*` registers work to execute later.
+All other algorithm work is declared in the plan. Allocate buffers while
+building; `add_*` registers work to execute later. Include `add_zero` for every
+C accumulator before its first GEMM on every execution. The common lifecycle
+restores A/B, but does not zero C for the builder.
 
 Cannon reuses tile buffers for common rows. Each has b²=N²/P words; separate h×b
 scratch preserves self segments during in-place conversion. This is the complete
@@ -167,43 +183,58 @@ Prepared output is writable contiguous FP32 of original shape.
 
 ## 4. Ring builder
 
-Implement `MatmulDefinition build_ring(BspPlan&, const MatmulConfig&)`. Require positive P and c=1;
-P need not be square. Let h=n/P. Bind A/C h×n rows and a circulating B h×n row
-block per node. For a ring sending to (r+1)%P, round t uses k=(r−t+P)%P:
+Implement `MatmulDefinition build_ring(BspPlan&, const MatmulConfig&)`.
+Require positive P and c=1; P need not be square. Let N=config.padded_size
+and h=N/P. Bind A/C h×N rows and a circulating B h×N row block per node.
+For a ring sending to (r+1)%P, round t uses k=(r−t+P)%P:
 
 $$
 C_r \mathrel{+}= A_r[:,kh:(k+1)h] B_k.
 $$
 
 Call `add_gemm(A_rows[r].submatrix(0,k*h,h,h), B[r], C[r], {r,k,0})`
-and return `product_grid={P,P,1}`. B's message region is
-`{k*h,0,h,n}`. Run P rounds, omitting the last send. Native layout is already
-common rows, so no row/block conversion is needed. With one step per round,
-expect F_total=2n³, W_crit=2n³/P, P(P−1) messages, C_total=(P−1)n²,
-C_crit=(P−1)n²/P, S=P. Derive/assert these independently of runtime counting.
+and return `product_grid={P,P,1}`. For t>0, call
+`step.add_receive((r+P-1)%P, B[r])` before the GEMM. Except in the last round,
+send `PayloadPart{B[r], {k*h,0}}` to (r+1)%P; its trace region is `{k*h,0,h,N}`.
+Zero C before the first GEMM and run P rounds. Native layout is already common
+rows, so no row/block conversion is needed. With one step per round, expect
+F_total=2N³, W_crit=2N³/P, P(P−1) messages, C_total=(P−1)N²,
+C_crit=(P−1)N²/P, S=P. Counts use padded N; reported useful GFLOP/s uses
+original n. Derive/assert these independently of runtime counting.
 Test P=1/2/3 and proposal P=16/64/256, including P>H.
 
 ## 5. 2.5D builder
 
-Implement `MatmulDefinition build_two_point_five_d(BspPlan&, const MatmulConfig&)`. Validate with
-`grid_size(P,c)`: P=c*q² and c divides q. Use id(z,i,j)=z*q²+i*q+j so the first
-q² IDs form the base layer. Use shared conversions, tree broadcasts of A/B over
+Implement `MatmulDefinition build_two_point_five_d(BspPlan&, const MatmulConfig&)`.
+Validate with `grid_size(P,c)`: P=c*q² and c divides q.
+Use id(z,i,j)=z*q²+i*q+j so the first q² IDs form the base layer.
+Use shared conversions, tree broadcasts of A/B over
 ordered groups `[id(0,i,j),...,id(c−1,i,j)]`, then layer GEMMs, tree sum of C to
-z=0 and shared conversion back to common rows. Preallocate all participants. The base layer uses shared row/tile conversions;
-other tile entries may be empty until replication. Build `NodePayloads` with
-A then B components and broadcast them together, so each tree edge sends one
-message. Reduce C through `add_tree_reduce_sum`. At c=1 singleton collectives
-append no steps; retain the same builder and lifecycle.
+z=0 and shared conversion back to common rows. Let N=config.padded_size.
+Bind common A/B/C row views for all P nodes, including nonbase layers. Allocate
+every participating layer's A/B/C tile storage while building, before calling
+the collective helpers. The conversion helper's tile list only needs populated
+entries for the base q² nodes; this does not permit empty views for participants
+in a tree's `NodePayloads`.
+
+Build `NodePayloads` with A then B components and broadcast them together, so
+each tree edge sends one message. Every participant needs owned views with
+matching component shapes and global origins. Zero all C accumulators before
+their first GEMM, then reduce C through `add_tree_reduce_sum`. The tree helpers
+append their complete send/receive sequence; continue with a new superstep.
+At c=1 singleton collectives append no steps; outputs and the declared schedule
+must agree with Cannon, including common conversions and skew. Use the same
+builder and lifecycle for all c.
 
 One valid layered Cannon schedule takes R=q/c rounds per layer. Initially shift
 A left by i+zR and B up by j+zR, modulo q. In round t use
-k=(i+j+zR+t)%q; between rounds shift A left and B up by one. Use block side b=n/q,
+k=(i+j+zR+t)%q; between rounds shift A left and B up by one. Use block side b=N/q,
 `add_gemm(A[node],B[node],C[node],{i,k,j})`, and return
 `product_grid={q,q,q}`. Across layers/rounds each
 (i,k,j) must occur exactly once. Do not run a full Cannon on every layer.
 
-Test P=64/c=4 (R=1), P=256/c=4 (R=2), and c=1 degeneration. Verify 2n³ GEMM
-FLOPs plus (c−1)n² reduction additions, actual coverage and all replicated/cache
+Test P=64/c=4 (R=1), P=256/c=4 (R=2), and c=1 degeneration. Verify 2N³ GEMM
+FLOPs plus (c−1)N² reduction additions, actual coverage and all replicated/cache
 memory. Public helpers count reduction additions automatically. Do not force a
 configuration through a memory budget when its recorded peak exceeds the cap.
 
