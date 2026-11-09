@@ -56,5 +56,6 @@ Edit `docs/` and update navigation when adding a page. Run the generator tests
 and strict build before committing. Commit and push this repository first,
 then commit its updated `doc/` submodule pointer in `dmm`.
 
-This repository builds a static site. Publishing or deployment is separate;
-no hosting workflow or public site is enabled here.
+GitHub Actions builds and deploys the MkDocs site on pushes to `main`.
+The workflow checks out `dmm` alongside the documentation to build the
+native extension and generate the API reference. [Published documentation](https://ceg5206-g7.github.io/dmm_doc/)

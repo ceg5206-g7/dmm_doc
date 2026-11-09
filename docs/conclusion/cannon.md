@@ -1,10 +1,10 @@
-# Cannon: conclusions against the proposal
+# Cannon case study
 
 Cannon provides a validated 2D baseline for the proposal's layout comparison.
 Its executed counts expose a trade-off between local work, critical communication,
 synchronization and memory. The limited single-machine measurements show higher
-parallel efficiency at larger matrix sizes in this run. Whether replication
-improves on this baseline remains open until ring and 2.5D are integrated.
+parallel efficiency at larger matrix sizes in this run. This page describes
+the earlier Cannon-only capture. [Formal three-layout comparison](../results.md)
 
 ## Scope and evidence
 
@@ -153,16 +153,11 @@ for definitions and timing boundaries. The P=16/64/256 captures are not physical
 parallel performance measurements, and memcpy coefficients are not network
 bandwidth measurements.
 
-## Questions awaiting the other layouts
+## Comparison criterion
 
-Cannon alone cannot determine whether replication saves enough communication
-to pay for replication, reduction and conversion, where a layout transition
-occurs as gamma/lambda change, or whether every layout has a winning region.
-Its current selection chart has one candidate and establishes feasibility only.
-
-After teammate integration, compare layouts at the same original n, P, gamma,
-lambda and memory cap. Exclude infeasible candidates first, then compare both
-native and common-route costs, retaining ties. For a feasible replicated
+Compare layouts at the same original n, P, gamma, lambda and memory cap.
+Filter by feasibility first, then compare native and common-route costs,
+retaining ties. For a feasible replicated
 candidate R to beat feasible Cannon C on the common route, it must satisfy:
 
 ```text
@@ -170,8 +165,6 @@ gamma*(C_crit_C - C_crit_R)
     > (W_crit_R - W_crit_C) + lambda*(S_R - S_C)
 ```
 
-R's counts must include reduction work, tree communication and common
-conversions. Filling those terms with actual 2.5D traces is the remaining
-evidence needed to answer the proposal's replication question. Ring and 2.5D,
-including c=1 degeneration, and the full 24-execution/192-scenario comparison
-remain pending. No multi-machine speedup or three-layout winner is claimed.
+R's counts include reduction work, tree communication and common conversions.
+The formal run applies this criterion using the executed 2.5D traces.
+[Results and Discussion](../results.md)

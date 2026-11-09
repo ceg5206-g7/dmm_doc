@@ -95,7 +95,7 @@ and may be zero. Sizes must be ascending and present in the dataset. Cannon
 requires square P=q*q and c=1; original dimensions are padded to a multiple of P
 and cropped on output. Each case requires
 exactly layout/P/c, with no duplicates. Layout names are `ring`, `cannon`, and
-`2.5d`; only Cannon is implemented. Old global algorithms/P/c keys must be
+`2.5d`. See the [layout constraints](algorithms/overview.md). Old global algorithms/P/c keys must be
 migrated to cases. All cases run across the shared modes, groups and sizes. Unsupported selections fail
 before output creation or worker startup.
 

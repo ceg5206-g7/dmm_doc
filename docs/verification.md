@@ -1,5 +1,14 @@
 # Framework verification record
 
+## Formal three-layout run (2026-11-09)
+
+The clean run at `9fc781b` completed all 24 main configurations and all nine
+signed padding configurations. The main traces produced 192 BSP scenarios and
+144 budget-selection cells. Both Ring and Cannon completed their serial and
+four-worker measurements with matching baselines, for 180 end-to-end timing
+samples. [Results and Discussion](results.md) ·
+[Experiment results archive](https://github.com/ceg5206-g7/dmm/releases/tag/experiment-results-9fc781b)
+
 ## Complete Cannon pipeline (2026-10-23)
 
 Source: `bd85893db2a75a67b4504cd952e30e3546632097`, captured with a clean parent
@@ -89,11 +98,9 @@ To repeat the method, use the saved YAMLs with fresh data/output paths and run
 the [model](model.md) and [measurement](measurement.md) guides give the CLI and
 output contracts. Existing reports are immutable and cannot be overwritten.
 
-This completes Cannon's pipeline verification. Selection plots explicitly name
-Cannon as the only candidate. Ring, 2.5D and the full three-layout
-24-execution/192-scenario comparison remain pending teammate integration; these
-results do not establish a winner among three layouts. Earlier records below
-retain their original revisions, datasets and timings.
+This historical run verifies the Cannon pipeline. Its selection plots contain
+only the Cannon candidate. Earlier records below retain their original
+revisions, datasets and timings.
 
 ## Formal measurement bounds and performance metrics (2026-10-23)
 
@@ -120,7 +127,6 @@ model-only reports leave comparison fields blank.
 Artifacts are retained locally under
 `/var/folders/lw/j9_lmxtd6gx45dln0mlczmn80000gn/T/dmm-performance-q_1o1mci/`.
 These runs verify the reporting pipeline and formulas; no fixed speedup is assumed.
-The C++ runtime and teammate algorithm scope are unchanged.
 
 ## Endpoint-matched DSL and code organization (2026-10-23)
 
@@ -150,7 +156,6 @@ Artifacts are local temporary files under
 `/var/folders/lw/j9_lmxtd6gx45dln0mlczmn80000gn/T/dmm-dsl-smoke-dkpxx9ro/`.
 These verify integration, not performance rankings. Historical traces preserve
 their recorded peaks/provenance; new records use ordered `regions` arrays.
-Ring/2.5D and the full comparison remain assigned to teammates.
 
 ## Historical unified operation-plan runtime (2026-10-23)
 
@@ -175,7 +180,7 @@ Smoke artifacts are local temporary files under
 `/var/folders/lw/j9_lmxtd6gx45dln0mlczmn80000gn/T/dmm-plan-smoke-jvrydv8f/`.
 They check functional integration, not performance rankings. The current
 [contribution guide](contribute.md) provides the builder contract and reproducible
-smoke profiles. Ring/2.5D and the full 24-configuration comparison remain pending.
+smoke profiles.
 
 ## Historical framework run
 
@@ -257,10 +262,3 @@ uv run dmm measure --config configs/measure_threaded.yaml
 Dataset settings for this validation were seed=5206, group=0, sizes=256/512/1024,
 FP32 range [0,255], with independently generated FP64 references. Every capture
 and measurement completion manifest preserves source/build/settings and hashes.
-
-## Pending teammate integration
-
-Ring and 2.5D remain assigned to teammates. The full 24 actual configurations /
-192 modeled scenarios have **not** been executed. `configs/model.yaml` and its
-cardinality test define the target; missing implementations fail preflight.
-No missing trace or measurement has been synthesized.

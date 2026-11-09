@@ -1,4 +1,5 @@
 site_name: CEG5206 — Distributed Matrix Multiplication
+site_url: https://ceg5206-g7.github.io/dmm_doc/
 nav:
   - Home: index.md
   - Usage and configuration: usage.md
@@ -7,10 +8,13 @@ nav:
   - Project proposal: proposal.md
   - Algorithms:
       - Overview: algorithms/overview.md
+      - Ring: algorithms/ring.md
       - Cannon: algorithms/cannon.md
+      - 2.5D: algorithms/two_point_five_d.md
   - Experiment methodology: experiments.md
   - Trace and model analysis: model.md
   - Prepared measurement and calibration: measurement.md
+  - Results and Discussion: results.md
   - Verification record: verification.md
   - Case conclusions:
       - Cannon: conclusion/cannon.md

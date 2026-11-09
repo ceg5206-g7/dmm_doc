@@ -37,8 +37,7 @@ flowchart TD
 ## Dataset and algorithm boundaries
 
 Each case explicitly supplies layout, P and c. P logical nodes are independent
-of H physical worker threads. Only Cannon is implemented; missing teammate
-layouts fail before execution.
+of H physical worker threads. Ring, Cannon and 2.5D share the builder contract.
 
 A builder has signature
 `MatmulDefinition build_xxx(BspPlan&, const MatmulConfig&)`. It receives immutable
@@ -56,9 +55,9 @@ a failed execution invalidates the snapshot until a successful retry.
 
 Ordinary calls create this same workspace temporarily. Prepared calls retain it.
 Both use identical schedules, communication, coverage and memory accounting.
-Python's `algorithms.cannon` module forwards to the shared API. The C++ entry
-points select a builder in `src/algorithms/registry.cpp`; new algorithms add one
-function, with no per-algorithm class or duplicate execution path.
+The Python layout modules forward to the shared API. The C++ entry points
+select a builder in `src/algorithms/registry.cpp`. Each layout supplies one
+builder function and uses the same execution path.
 
 ## Communication model
 

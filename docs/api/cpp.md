@@ -35,7 +35,8 @@ zeroing and operations; the workspace validates bindings and finalizes the plan.
 
 `algorithms.hpp` declares builders, `select_builder(layout)` and the ordinary
 `matmul` / `matmul_traced` entry points. Their trailing arguments are
-`layout="cannon", P=16, c=1`. Only Cannon is implemented. Ring/2.5D fail explicitly.
+`layout="cannon", P=16, c=1`. The other layout selectors are `ring` and `2.5d`.
+See the [layout constraints](../algorithms/overview.md).
 
 ## Preallocated execution
 

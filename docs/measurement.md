@@ -5,11 +5,10 @@ uv run dmm measure --config configs/measure_serial.yaml
 uv run dmm measure --config configs/measure_threaded.yaml --baseline results/measure_serial
 ```
 
-The profiles use existing group-0 matrices at n=256,512,1024. The serial profile
-uses Cannon P=1/H=1; the threaded profile uses P=4/H=4 and refuses to start unless
-at least four physical cores are detected. Use a fresh output directory. Neither
-input datasets nor existing reports are overwritten. Missing teammate algorithms
-fail preflight. Profiles accept per-case layout/P/c, one shared worker count,
+The profiles use the same group-0 matrices at n=256,512,1024 for Ring and
+Cannon. The serial profile uses P=1/H=1. The threaded profile uses P=4/H=4
+and requires at least four detected physical cores. Use a fresh output
+directory for each run. Profiles accept per-case layout/P/c, one shared worker count,
 group, sizes, warmups and repeats. Defaults are five warmups and fifteen repeats.
 Every case must satisfy **P <= H**, with serial H=1. Oversubscribed cases fail
 before loading matrices, calibration or output creation; use `dmm model` for
@@ -29,8 +28,7 @@ allocation and cannot be used as these baselines.
 Algorithms expose `prepare(A,B,*,P,c)` and a prepared object with
 `run_into(output,executor)` and `trace()`. The C++ [prepared runtime](api/cpp.md#preallocated-execution)
 preallocates node buffers, message caches, operation lists and trace metadata.
-The common `PreparedMatmul` owns this lifecycle for every layout. Cannon supplies
-only its builder; ring/2.5D builders remain teammate work.
+The common `PreparedMatmul` owns this lifecycle for all three layout builders.
 
 The **internal native timer** starts at common input row shards and stops at
 common output row shards. It includes zeroing C, all layout conversion/packing,
@@ -132,8 +130,7 @@ still uses the real measured time. The manifest records the external baseline
 path/hash and formulas. Pure `dmm model` reports leave all three performance
 fields and `t_measured` blank, including offline replay of measurement traces.
 
-## Remaining integration gate
+## Formal results
 
-Cannon validates the shared pipeline. The complete 24-configuration/192-scenario
-comparison still needs actual ring and 2.5D algorithms from teammates; neither
-these measurements nor cardinality tests claim that integration has passed.
+The formal single-machine comparison covers Ring and Cannon. The separate
+three-layout BSP sweep includes replicated 2.5D. [Results and Discussion](results.md)

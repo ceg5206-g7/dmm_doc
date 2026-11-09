@@ -93,4 +93,4 @@ Node storage uses move-only tracked buffers and explicit message operations.
 The builder receives immutable P/c; the common workspace owns all buffers.
 Source-node formulas match next-step receives without tags or incoming-message tables. Executed block triples and actual GEMM
 shapes are recorded by `BspPlan` during execution and checked by
-`validate_coverage`. The 1D/2.5D algorithms remain pending. See [framework milestones](../framework.md).
+`validate_coverage`. See the [formal comparison](../results.md) for the other layouts.

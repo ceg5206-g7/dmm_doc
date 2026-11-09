@@ -2,8 +2,8 @@
 
 The eight accepted implementation decisions below have code, tests and committed
 documentation. The [versioned proposal](proposal.pdf) includes the approved
-C++20 amendment. Full three-layout experimental acceptance remains a separate
-integration gate; implemented infrastructure does not establish that comparison.
+C++20 amendment. The formal three-layout run and its measurement subset are
+documented separately. [Results and Discussion](results.md)
 
 - [x] Shared rectangular FP32 blocked GEMM: tile 32, row strides, tails, no allocation.
 - [x] Fixed binary-tree broadcast and FP32 sum reduction through copied BSP messages.
@@ -43,18 +43,11 @@ held-out full-matrix runs and preserves every raw sample/residual. Source/build,
 settings, input hashes, physical/logical CPUs, binding policy and load are saved.
 See the [verification record](verification.md) for actual runs and limitations.
 
-## Remaining integration gate
+## Integration verification
 
-- [ ] Implement ring and 2.5D (**assigned to teammates**).
-- [ ] Execute the full `configs/model.yaml`: 24 actual configurations, 192 model
-      scenarios and 144 budget-selection cells with all required candidates.
-
-The frozen profile/cardinality test specifies that target; it does not replace
-execution. Missing algorithms fail preflight. No unavailable algorithm is
-represented by a fabricated or analytic execution. Shared framework verification
-has passed for real Cannon cases and independent c=4 conversion tests; the full
-three-layout comparison awaits teammate implementations.
-
-Each implementation milestone was tested and committed in both repositories.
-Teammates follow the [algorithm/prepare contracts](contribute.md), using the shared
-kernel, communication, collectives, conversions, coverage and measurement APIs.
+- [x] Integrate [Ring](algorithms/ring.md) and [2.5D](algorithms/two_point_five_d.md)
+      with the shared plan and Python interfaces.
+- [x] Execute the full `configs/model.yaml` grid of 24 configurations and
+      generate 192 model scenarios and 144 budget-selection cells.
+- [x] Verify the padding cases and measure the Ring and Cannon single-machine
+      subset. [Verification record](verification.md)

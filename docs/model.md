@@ -98,15 +98,14 @@ no feasible candidate explicitly say infeasible.
 - `peak_memory.png`: payload peak normalized by n²/P with each budget marked;
   raw word counts are annotated. This is not whole-process RSS or DRAM traffic.
 
-## Full proposal profile and remaining gates
+## Full proposal profile
 
 `configs/model.yaml` freezes 3 sizes times 8 layout/P/c cases = 24 actual
 configurations. Four gammas and two lambdas produce 192 model rows; two budgets
 produce 144 layout-selection cells. Cardinality tests verify this plan.
 
-**The full run is not complete:** ring and 2.5D are not yet implemented, so that
-profile currently rejects preflight. The shared pipeline and charts are tested
-with actual Cannon traces. The proposal gate still requires the real 24 traces,
-including P=256,c=4. The [prepared measurement command](measurement.md) separately provides independent
-calibration and held-out residual checks with the same saved-trace format. See
-[framework milestones](framework.md).
+The formal run at `9fc781b` captured all 24 configurations, including
+`P=256,c=4`. The [results](results.md) compare native and common-route counts
+and apply both budgets to those traces. The prepared measurement command
+provides separate calibration and held-out residual checks using the same
+trace format. [Measurement protocol](measurement.md)

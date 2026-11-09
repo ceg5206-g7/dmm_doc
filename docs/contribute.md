@@ -22,7 +22,7 @@ shows the complete pipeline already exercised with Cannon.
 | `src/bindings.cpp`, `python/dmm/matmul.py` | Common binding/NumPy protocol |
 | `python/dmm/algorithms/cannon.py` | Thin forwarding functions for runner discovery |
 
-| Item to add | 1D ring | 2.5D |
+| Integration point | 1D ring | 2.5D |
 | --- | --- | --- |
 | Layout string | `ring` | `2.5d` |
 | Builder | `build_ring` | `build_two_point_five_d` |
@@ -32,7 +32,7 @@ shows the complete pipeline already exercised with Cannon.
 | Algorithm page | `doc/docs/algorithms/ring.md` | `doc/docs/algorithms/two_point_five_d.md` |
 
 Declare the builder in `include/dmm/algorithms.hpp`, select it for the layout in
-`src/algorithms/registry.cpp` (replacing that layout's unimplemented rejection),
+`src/algorithms/registry.cpp`,
 and add the source and C++ tests to `CMakeLists.txt`. Add Python integration tests
 under `tests/python/` and update `doc/mkdocs.yml` navigation. Layout module names
 are already registered in `python/dmm/config.py`. No new switch or class is
@@ -183,7 +183,8 @@ Prepared output is writable contiguous FP32 of original shape.
 
 ## 4. Ring builder
 
-Implement `MatmulDefinition build_ring(BspPlan&, const MatmulConfig&)`.
+The [Ring builder](algorithms/ring.md) uses
+`MatmulDefinition build_ring(BspPlan&, const MatmulConfig&)`.
 Require positive P and c=1; P need not be square. Let N=config.padded_size
 and h=N/P. Bind A/C h×N rows and a circulating B h×N row block per node.
 For a ring sending to (r+1)%P, round t uses k=(r−t+P)%P:
@@ -205,7 +206,8 @@ Test P=1/2/3 and proposal P=16/64/256, including P>H.
 
 ## 5. 2.5D builder
 
-Implement `MatmulDefinition build_two_point_five_d(BspPlan&, const MatmulConfig&)`.
+The [2.5D builder](algorithms/two_point_five_d.md) uses
+`MatmulDefinition build_two_point_five_d(BspPlan&, const MatmulConfig&)`.
 Validate with `grid_size(P,c)`: P=c*q² and c divides q.
 Use id(z,i,j)=z*q²+i*q+j so the first q² IDs form the base layer.
 Use shared conversions, tree broadcasts of A/B over
@@ -336,14 +338,9 @@ uv run --locked pytest -q tests/python doc/tests
 (cd doc && uvx --with-requirements requirements.txt mkdocs build --strict)
 ```
 
-Update the algorithm page, `doc/mkdocs.yml` and status overview only after
-verification. After capturing experiment results, add one
-`doc/docs/conclusion/<algorithm>.md` page using the same filename stem as the
-algorithm page. Follow [Cannon's conclusions](conclusion/cannon.md): answer the
-proposal's communication, conversion, memory and model questions with actual
-evidence, and identify comparison questions still pending other layouts.
-Add that page under **Case conclusions** in navigation.
+Update the algorithm page, `doc/mkdocs.yml` and status overview after
+verification. Use captured traces and measurements when updating the
+[formal comparison](results.md), and preserve the run revision and evidence.
 
-Commit `doc/` first, then source/tests/configs and the updated
-submodule pointer in the parent repository. Both teammate algorithms must be
-implemented before running the full 24-configuration/192-scenario comparison.
+Commit `doc/` first, then source, tests, configs and the updated submodule
+pointer in the parent repository.
