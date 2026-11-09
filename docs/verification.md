@@ -130,7 +130,7 @@ These runs verify the reporting pipeline and formulas; no fixed speedup is assum
 
 ## Endpoint-matched DSL and code organization (2026-10-23)
 
-The migration based on main revision `d3733ad` replaces public tags/message IDs
+The DSL at main revision `d3733ad` replaces public tags/message IDs
 with next-step endpoint matching and ordered payload components. `plan.hpp`
 contains the DSL, `plan_build.cpp` validates it, and `plan_execute.cpp` interprets
 it. `src/algorithms/` contains builders and selection; config is immutable and
@@ -149,7 +149,7 @@ removed. Python trace I/O/validation now lives in `dmm.trace`.
   repetitions passed (four configurations, 420 phase/end-to-end sample rows).
 - Offline model replay passed using new schema-2 measurement traces with a
   nonexistent input path. The previous real schema-1 CLI capture also replayed
-  successfully without matrices. A committed pre-migration real trace fixture
+  successfully without matrices. A committed schema-1 trace fixture
   separately checks historical loading/counts without algorithm execution.
 
 Artifacts are local temporary files under

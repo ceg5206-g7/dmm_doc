@@ -2,8 +2,8 @@
 
 Documentation for [ceg5206-g7/dmm](https://github.com/ceg5206-g7/dmm), maintained
 in [dmm_doc](https://github.com/ceg5206-g7/dmm_doc) and checked out as `doc/`
-inside the main project. The MkDocs layout, pydoc hook, Mermaid and MathJax
-support follow [matmul_doc](https://github.com/ceg5201-group5/matmul_doc).
+inside the main project. The site uses MkDocs, with a pydoc hook for the API
+reference and Mermaid and MathJax for diagrams and equations.
 
 ## Build and preview
 
@@ -45,8 +45,8 @@ uv run --locked pytest doc/tests -q
 - `tests/`: API generator checks.
 - `mkdocs.yml`: navigation, watched paths and Markdown extensions.
 
-Mermaid and MathJax use pinned CDN URLs from the original documentation framework.
-Rendering diagrams and equations requires JavaScript and access to jsDelivr.
+Rendering Mermaid diagrams and MathJax equations requires JavaScript and
+access to jsDelivr.
 Native pydoc pages support browser Find; MkDocs search indexes their module
 directory, rather than every generated member.
 

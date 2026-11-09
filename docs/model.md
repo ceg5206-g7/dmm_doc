@@ -36,7 +36,7 @@ with `tag` and a single `region` remain readable; their original counts, peaks
 and provenance are preserved. The completion manifest stays schema 1, separately
 versioned from its trace files. `python/dmm/trace.py` owns serialization,
 independent validation and hash-checked loading; model and measurement share it.
-A real pre-migration schema-1 Cannon fixture is tested through offline replay.
+An earlier schema-1 Cannon trace is tested through offline replay.
 
 A failed capture may leave partial files. Without a complete manifest and every
 expected trace, model analysis refuses to proceed. Missing algorithms fail
